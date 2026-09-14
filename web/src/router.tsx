@@ -14,6 +14,7 @@ import { FirstLoginPage } from '@/features/auth/first-login-page'
 import { ForgotPasswordPage } from '@/features/auth/forgot-password-page'
 import { LoginPage } from '@/features/auth/login-page'
 import { ResetPasswordPage } from '@/features/auth/reset-password-page'
+import { GalleryDetailPage } from '@/features/gallery/gallery-detail-page'
 import { GalleryPage } from '@/features/gallery/gallery-page'
 import { HomePage } from '@/features/home/home-page'
 import { JobsPage } from '@/features/jobs/jobs-page'
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
           { index: true, element: <HomePage /> },
           { path: 'upload', element: <UploadPage /> },
           { path: 'gallery', element: <GalleryPage /> },
+          { path: 'gallery/:uid', element: <GalleryDetailPage /> },
           { path: 'albums', element: <AlbumsPage /> },
           { path: 'jobs', element: <JobsPage /> },
           { path: 'logs', element: <LogsPage /> },

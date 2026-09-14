@@ -1,5 +1,6 @@
 import type { AxiosAdapter, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
+import { handleW8 } from '@/mocks/handlers-w8'
 import type { Envelope, PageData, User } from '@/types/api'
 import { ApiCode } from '@/types/api'
 
@@ -383,6 +384,11 @@ function handle(config: AxiosRequestConfig): AxiosResponse<Envelope<unknown>> | 
       }),
     )
   }
+
+  // ---- W8 各域（存储 / 图库 / 相册 / 任务 / 日志 / 插件 / 主题 / 系统设置）----
+  // 独立文件维护，避免本文件无限膨胀；字段与信封严格按 docs/API.md。
+  const w8 = handleW8(method, path, config)
+  if (w8) return w8 as ReturnType<typeof respond>
 
   return null
 }

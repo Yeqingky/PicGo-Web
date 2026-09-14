@@ -1,4 +1,7 @@
 import { Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+import { CommandPalette } from '@/components/layout/command-palette'
 
 import { IconButton } from '@/components/ui/icon-button'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
@@ -22,6 +25,19 @@ interface TopbarProps {
  */
 export function Topbar({ siteName, className }: TopbarProps) {
   const user = useAuthStore((state) => state.user)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // `⌘/Ctrl + K` 打开命令面板（DESIGN.md §9.1）—— 全局快捷键，挂在 window 上
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   const collapsed = useUIStore((state) => state.sidebarCollapsed)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const setMobileNavOpen = useUIStore((state) => state.setMobileNavOpen)
@@ -58,11 +74,10 @@ export function Topbar({ siteName, className }: TopbarProps) {
       <span className="truncate text-sm font-semibold text-foreground">{siteName}</span>
 
       <div className="ml-auto flex items-center gap-1">
-        {/*
-          命令面板（⌘K）：DESIGN.md §9.1 列为全局快捷键。
-          本轮仅占位（disabled），实际实现排在后续工作流。
-        */}
-        <IconButton label={t('TOPBAR_COMMAND_PALETTE_HINT')} disabled>
+        <IconButton
+          label={t('TOPBAR_COMMAND_PALETTE')}
+          onClick={() => setPaletteOpen(true)}
+        >
           <Search className="size-4" aria-hidden />
         </IconButton>
 
@@ -70,6 +85,8 @@ export function Topbar({ siteName, className }: TopbarProps) {
 
         {user ? <UserMenu /> : null}
       </div>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </header>
   )
 }

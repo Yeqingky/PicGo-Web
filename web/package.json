@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "mock:test": "node scripts/mock-contract.mjs",
+    "i18n": "python3 scripts/i18n-w8.py"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.20",

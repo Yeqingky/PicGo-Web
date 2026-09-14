@@ -1,4 +1,4 @@
-import { del, get, patch, post, put } from '@/lib/http'
+import { del, get, patch, post } from '@/lib/http'
 import type {
   APIToken,
   CreateAPITokenRequest,
@@ -8,17 +8,25 @@ import type {
   OAuthBindResponse,
   OAuthProvidersResponse,
   RefreshResponse,
-  SettingsResponse,
   SiteConfigResponse,
-  SystemInfo,
-  UpdateUserSettingsResponse,
   User,
 } from '@/types/api'
 
 /**
- * 按域封装的接口调用（DESIGN.md §14.1）。
+ * 按域拆分的接口调用（DESIGN.md §14.1）。
  *
- * ⚠️ 请求函数一律写在这里，**不要散落在组件里**。
+ * ⚠️ 请求函数一律写在各域文件里，**不要散落在组件里**。
+ *
+ * | 域 | 文件 | 说明 |
+ * |---|---|---|
+ * | 认证 / 用户 / API Token | `index.ts`（本文件） | 基础且与其它域无耦合，留在入口 |
+ * | 存储 | `storage.ts` | admin |
+ * | 图库 / 相册 | `gallery.ts` | |
+ * | 任务 | `job.ts` | |
+ * | 日志 | `log.ts` | admin |
+ * | 插件 | `plugin.ts` | admin |
+ * | 主题 | `theme.ts` | admin |
+ * | 设置 / 系统 | `setting.ts` | |
  */
 
 // ---------------------------------------------------------------------------
@@ -143,8 +151,17 @@ export const usersApi = {
 // ---------------------------------------------------------------------------
 
 export const apiTokensApi = {
-  list(): Promise<APIToken[]> {
-    return get<APIToken[]>('/settings/api-tokens')
+  /**
+   * 列出自己的 API Token。
+   *
+   * ⚠️ 对**后端当前实现与 `docs/API.md` 的偏离**做容错：
+   * 契约未细化该响应的形状，后端当前返回 `{ Items: [...] }`。
+   * 这里两种都接受，统一返回数组（归一化集中在这一处）。
+   */
+  async list(): Promise<APIToken[]> {
+    const data = await get<APIToken[] | { Items: APIToken[] }>('/settings/api-tokens')
+    if (Array.isArray(data)) return data
+    return data?.Items ?? []
   },
 
   /** 明文 `Token` 只在创建响应里返回一次（D31）。 */
@@ -154,31 +171,6 @@ export const apiTokensApi = {
 
   revoke(uid: string): Promise<null> {
     return del<null>(`/settings/api-tokens/${encodeURIComponent(uid)}`)
-  },
-}
-
-// ---------------------------------------------------------------------------
-// 设置（API.md §11）
-// ---------------------------------------------------------------------------
-
-export const settingsApi = {
-  /** 站点公开信息 + 用户级设置。 */
-  get(): Promise<SettingsResponse> {
-    return get<SettingsResponse>('/settings')
-  },
-
-  /** 更新用户级设置（落 UserSettings 表）。 */
-  updateUser(payload: Record<string, unknown>): Promise<UpdateUserSettingsResponse> {
-    return put<UpdateUserSettingsResponse>('/settings', payload)
-  },
-
-  /** 全部系统键位 + 当前生效值（admin）。 */
-  getSystem(): Promise<Record<string, unknown>> {
-    return get<Record<string, unknown>>('/settings/system')
-  },
-
-  updateSystem(payload: Record<string, unknown>): Promise<{ Updated: number }> {
-    return put<{ Updated: number }>('/settings/system', payload)
   },
 }
 
@@ -198,24 +190,38 @@ export const siteApi = {
 }
 
 // ---------------------------------------------------------------------------
-// 系统（API.md §10）
+// 按域重导出（DESIGN.md §14.1）
 // ---------------------------------------------------------------------------
 
-export const systemApi = {
-  info(): Promise<SystemInfo> {
-    return get<SystemInfo>('/system/info')
-  },
-}
+export { albumApi, uploadApi, type UploadFilesInput } from '@/lib/api/gallery'
+export { jobApi } from '@/lib/api/job'
+export { logApi } from '@/lib/api/log'
+export { pluginApi } from '@/lib/api/plugin'
+export { settingsApi, systemApi } from '@/lib/api/setting'
+export { storageApi, fetchDefaultStorageConfig, type StorageConfigListParams } from '@/lib/api/storage'
+export { themeApi } from '@/lib/api/theme'
 
-// ---------------------------------------------------------------------------
-// 聚合导出，便于按域引用
-// ---------------------------------------------------------------------------
+import { albumApi, uploadApi } from '@/lib/api/gallery'
+import { jobApi } from '@/lib/api/job'
+import { logApi } from '@/lib/api/log'
+import { pluginApi } from '@/lib/api/plugin'
+import { settingsApi, systemApi } from '@/lib/api/setting'
+import { storageApi } from '@/lib/api/storage'
+import { themeApi } from '@/lib/api/theme'
 
+/** 聚合导出，便于按域引用（也便于 mock 层整体替换）。 */
 export const api = {
   auth: authApi,
   users: usersApi,
   apiTokens: apiTokensApi,
-  settings: settingsApi,
   site: siteApi,
+  settings: settingsApi,
   system: systemApi,
+  storage: storageApi,
+  upload: uploadApi,
+  album: albumApi,
+  job: jobApi,
+  log: logApi,
+  plugin: pluginApi,
+  theme: themeApi,
 }

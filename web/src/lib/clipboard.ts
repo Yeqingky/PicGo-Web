@@ -11,6 +11,8 @@
  *    但那属于第三方契约，内置 SPA 不消费。
  */
 
+import { t } from '@/i18n'
+
 export type LinkFormat = 'markdown' | 'url' | 'html'
 
 export const LINK_FORMATS: LinkFormat[] = ['markdown', 'url', 'html']
@@ -45,6 +47,19 @@ export function fileNameFromUrl(url: string): string {
   } catch {
     const last = url.split('/').filter(Boolean).pop()
     return last ?? url
+  }
+}
+
+/** 格式的展示名（i18n key）。 */
+export function linkFormatLabel(format: LinkFormat): string {
+  switch (format) {
+    case 'markdown':
+      return t('LINK_FORMAT_MARKDOWN')
+    case 'html':
+      return t('LINK_FORMAT_HTML')
+    case 'url':
+    default:
+      return t('LINK_FORMAT_URL')
   }
 }
 

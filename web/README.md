@@ -105,20 +105,26 @@ src/
 ├── types/
 │   ├── api.ts                        ★ 与 docs/API.md 手写同步（字段 PascalCase，D81）
 │   └── schema.ts                     两套 schema 的原始类型（插件 / 主题）
-├── store/                            Zustand：auth / ui / task
-├── hooks/api/                        服务端状态 hooks（useAsync / useUsers / useSiteConfig）
+├── store/                            Zustand：auth / ui / task / upload（队列）/ gallery（筛选）
+├── hooks/api/                        服务端状态 hooks（useAsync / usePaged + 各域）
 ├── components/
-│   ├── ui/                           29 个 shadcn 风格基础件（Radix + Tailwind）
+│   ├── ui/                           30 个 shadcn 风格基础件（Radix + Tailwind）
 │   ├── layout/                       AppShell / Sidebar / Topbar / UserMenu / QuotaBar /
-│   │                                  ThemeToggle / 路由守卫 / 403 / 404 / 占位页
+│   │                                  ThemeToggle / 命令面板（⌘K）/ 路由守卫 / 403 / 404
+│   ├── common/                       PageHeader / LinkCopyMenu / ConfirmDialog / JsonView / 状态徽章
+│   ├── gallery/                      ImageCard / ImageGrid / ImageList / Lightbox / 整理对话框
+│   ├── upload/                       UploadDropzone / UploadQueue / 整页拖拽遮罩
+│   ├── jobs/                         JobLogDrawer（逐行日志 + 结果 JSON）
+│   ├── storage/                      CapabilityBadges（能力徽章）
+│   ├── themes/                       ThemeCard / ThemeUploadDialog / ThemeSettingsDrawer
 │   ├── icons/                        本地图标（lucide 1.x 已移除品牌图标）
 │   └── schema-form/                  ★ 动态表单渲染器（插件 + 主题共用）
-├── i18n/                             中文为源，英文预留（D75）
-├── mocks/                            VITE_USE_MOCK 的 adapter
+├── i18n/                             中文为源（583 条），英文部分覆盖（D75）
+├── mocks/                            VITE_USE_MOCK 的 adapter（index + handlers-w8）
 └── features/                         按业务域切分
-    ├── auth/                         login（完整）/ first-login（完整）/ forgot / reset
+    ├── auth/                         login / first-login / forgot / reset（完整）
     ├── home/                         开发期占位（生产由主题渲染）
-    ├── upload/ gallery/ albums/ jobs/ logs/ settings/
+    ├── upload/ gallery/（含 :UID 详情）albums/ jobs/ logs/ settings/
     └── admin/{users,storage,plugins,themes,site,logs}/
 ```
 
@@ -187,6 +193,45 @@ picgo 侧字段与驱动配置字段名（`picgoPlugins` / `repo` / `token` / `p
 
 ---
 
+## W8 已实现的能力
+
+按 `docs/DESIGN.md` §5 逐页实现：
+
+| 页面 | 关键实现 |
+|---|---|
+| `/upload` | 拖拽 / 点击 / 粘贴（全局遮罩）；**目标存储单选**（D38，切换只影响新加入队列的文件）；队列逐项进度 + 重试；成功后直接复制外链；上传中 `beforeunload` 提示 |
+| `/gallery` | **管理员顶部 Tab「我的 / 全部」**（D71，两 Tab 各存筛选）；网格（CSS columns 瀑布流）/ 列表视图；筛选 + 排序；多选（`Shift` 连选、`⌘/Ctrl+A`、`Esc`）；批量复制/移动/删除；**灯箱**（`←/→` 切换）；**不做缩略图**（D84） |
+| `/gallery/:UID` | 大图 + 元数据 + 外链 + 重命名 / 移动 / 删除 |
+| `/albums` | 相册卡片（封面 + 计数）+ 新建/编辑/删除；有图片时删除被拒并提示 |
+| `/jobs` | 表格 + 进度；行点击开**日志抽屉**（SSE 实时 + `AfterSeq` 增量补齐）；清理已完成 |
+| `/logs`、`/admin/logs` | 类型/状态/关键词筛选；详情抽屉（格式化 JSON）；管理员多「邮件日志」Tab（**不显示正文**，D29） |
+| `/admin/storage` | 卡片列表 + 能力徽章；新建/编辑抽屉（**动态表单** + **魔法路径变量可点击插入**）；密钥遮蔽、未改动不提交；连通性测试；`PicgoConfigName` 只读 |
+| `/admin/plugins` | 已安装 / 浏览（npm 搜索）双 Tab；`GuiOnly` 徽章 + 提示；异步操作 → 任务日志抽屉；**内核重启提示 + 轮询 `/healthz`** |
+| `/admin/themes` | 主题卡片（**展示 `Pages` 接管范围**、`Valid=false` 红色错误卡）；zip 上传（失败时逐条展示校验原因）；设置抽屉（复用 schema 渲染器 + `Source` 徽章）；卸载约束与危险区 |
+| `/admin/site` | 站点信息 / 邮件（含测试发信）/ 登录方式 / 安全 / 日志 / 高级 / 关于；每项 `Source` 徽章；OAuth 回调地址一键复制 |
+| `/admin/users` | 列表 + 新建/编辑 + 重置密码（明文只显示一次）+ 注销；**删除自己 / 最后一个管理员被禁用** |
+| `/settings` | 账号信息、改密码、GitHub 绑定/解绑、API Token（明文只显示一次）、主题偏好 |
+| 全局 | **命令面板 `⌘K`**、SSE 断线提示、明暗主题、a11y（焦点环 / `aria-label` / 语义 alt） |
+
+---
+
+## 与后端的已知不一致（**需要后端对齐**）
+
+联调时发现以下 3 项后端实现与 `docs/API.md` 有出入。前端已做**容错读取**（不阻塞使用），
+但**契约仍是 `API.md`**，建议后端对齐：
+
+| # | 端点 | 契约（`API.md`） | 后端当前 | 前端处理 |
+|---|---|---|---|---|
+| 1 | `GET /plugins` | `{ Items, PendingJobs }` | `{ Plugins, Disabled }` | `usePlugins` 里归一化（两种都读） |
+| 2 | `GET /settings/api-tokens` | 未细化 | `{ Items: [...] }` | `apiTokensApi.list()` 统一返回数组 |
+| 3 | `GET /storage/configs` | `StorageConfig` 无 `Config` 字段 | 多返回 `Config`（**值已脱敏为 `******`**） | 忽略该字段（用 `HasSecrets` / `SecretFields`） |
+
+**后端缺失**（前端已做友好降级，页面显示「加载失败」提示而非白屏）：
+
+- `GET /settings/system` —— 「站点设置」页与「日志保留天数」提示依赖它（返回 `40401`）。
+
+---
+
 ## 与文档的边界
 
 | 想知道 | 看 |
@@ -209,3 +254,8 @@ picgo 侧字段与驱动配置字段名（`picgoPlugins` / `repo` / `token` / `p
 - **`/` 是开发期占位**，生产由主题渲染（见上文说明）。
 - `AlertDialog` 中的**异步确认按钮不要用 `AlertDialogAction`**（它会立即关闭对话框）；
   用普通 `Button` + 手动控制 `open`（DESIGN §9.3）。
+- **mock 有契约测试**：`node scripts/mock-contract.mjs`（56 项断言，覆盖各域的
+  字段名 PascalCase、信封、分页形状、以及若干决策点如「Job 无 partial」「邮件日志无正文」
+  「主题不允许接管 /login」）。改 mock 后请跑一遍，确保 mock 与 `docs/API.md` 不漂移。
+- **i18n 词条用脚本维护**：`python3 scripts/i18n-w8.py`（幂等，可重复执行）。
+  文案禁止硬编码（D75 / DESIGN §13）。
