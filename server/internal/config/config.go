@@ -31,20 +31,25 @@ const (
 
 // 环境变量名（D81.3 第 2 条：环境变量保持 UPPER_SNAKE_CASE，不受 PascalCase 影响）。
 const (
-	EnvListen     = "PICGO_WEB_LISTEN"
-	EnvDataDir    = "PICGO_WEB_DATA_DIR"
-	EnvSecretKey  = "PICGO_WEB_SECRET_KEY"
-	EnvLogLevel   = "PICGO_WEB_LOG_LEVEL"
-	EnvTrustProxy = "PICGO_WEB_TRUST_PROXY"
-	EnvAgentURL   = "PICGO_WEB_AGENT_URL"
-	EnvAgentToken = "PICGO_WEB_AGENT_TOKEN"
-	EnvAgentAuto  = "PICGO_WEB_AGENT_AUTOSTART"
-	EnvAgentMock  = "PICGO_WEB_AGENT_MOCK"
-	EnvAllowPriv  = "PICGO_WEB_ALLOW_PRIVATE_FETCH"
-	EnvDevMode    = "PICGO_WEB_DEV"
-	EnvStaticDir  = "PICGO_WEB_STATIC_DIR"
-	EnvThemesDir  = "PICGO_WEB_THEMES_DIR"
-	EnvThemeSeed  = "PICGO_WEB_THEME_SEED"
+	EnvListen      = "PICGO_WEB_LISTEN"
+	EnvDataDir     = "PICGO_WEB_DATA_DIR"
+	EnvSecretKey   = "PICGO_WEB_SECRET_KEY"
+	EnvLogLevel    = "PICGO_WEB_LOG_LEVEL"
+	EnvTrustProxy  = "PICGO_WEB_TRUST_PROXY"
+	EnvAgentURL    = "PICGO_WEB_AGENT_URL"
+	EnvAgentToken  = "PICGO_WEB_AGENT_TOKEN"
+	EnvAgentAuto   = "PICGO_WEB_AGENT_AUTOSTART"
+	EnvAgentMock   = "PICGO_WEB_AGENT_MOCK"
+	EnvAgentDir    = "PICGO_WEB_AGENT_DIR"
+	EnvAgentCmd    = "PICGO_WEB_AGENT_COMMAND"
+	EnvAgentNpmReg = "PICGO_WEB_AGENT_NPM_REGISTRY"
+	EnvAgentNpmPxy = "PICGO_WEB_AGENT_NPM_PROXY"
+	EnvAgentUpPxy  = "PICGO_WEB_AGENT_UPLOAD_PROXY"
+	EnvAllowPriv   = "PICGO_WEB_ALLOW_PRIVATE_FETCH"
+	EnvDevMode     = "PICGO_WEB_DEV"
+	EnvStaticDir   = "PICGO_WEB_STATIC_DIR"
+	EnvThemesDir   = "PICGO_WEB_THEMES_DIR"
+	EnvThemeSeed   = "PICGO_WEB_THEME_SEED"
 
 	EnvDBDriver = "PICGO_WEB_DB_DRIVER"
 	EnvDBDSN    = "PICGO_WEB_DB_DSN"
@@ -124,6 +129,14 @@ type Config struct {
 	AgentToken     string
 	AgentAutostart bool
 	AgentMock      bool
+	// AgentDir picgo-agent 所在目录（含 dist/index.js）。留空则自动探测。
+	AgentDir string
+	// AgentCommand 显式指定启动命令（空格分隔）。优先级高于 AgentDir。
+	AgentCommand string
+	// 传给 agent 的 npm 配置与上传代理（agent 侧用于插件安装与上传）。
+	AgentNpmRegistry string
+	AgentNpmProxy    string
+	AgentUploadProxy string
 
 	// 抓取外部 URL 时是否允许私有网段（SSRF 防护开关）
 	AllowPrivateFetch bool
@@ -172,6 +185,11 @@ func Load(envFiles ...string) (*Config, error) {
 		AgentToken:        envStr(EnvAgentToken, DefaultAgentToken),
 		AgentAutostart:    envBool(EnvAgentAuto, true),
 		AgentMock:         envBool(EnvAgentMock, false),
+		AgentDir:          envStr(EnvAgentDir, ""),
+		AgentCommand:      envStr(EnvAgentCmd, ""),
+		AgentNpmRegistry:  envStr(EnvAgentNpmReg, ""),
+		AgentNpmProxy:     envStr(EnvAgentNpmPxy, ""),
+		AgentUploadProxy:  envStr(EnvAgentUpPxy, ""),
 		AllowPrivateFetch: envBool(EnvAllowPriv, false),
 	}
 

@@ -59,6 +59,13 @@ type UploadService struct {
 	hub      *events.Hub
 	audit    *AuditService
 
+	// uploadsRoot 是本地暂存目录的**绝对路径**。
+	//
+	// 为什么必须是绝对路径：暂存文件路径要**跨进程**传给 picgo-agent
+	// （`POST /api/upload` 的 `Path`），而 agent 以自己的目录为 cwd ——
+	// 相对路径会被它解析到 picgo-agent/data/... 从而找不到文件（踩过）。
+	uploadsRoot string
+
 	// ---- 队列状态 ----
 	queue chan *queuedUpload
 
@@ -115,18 +122,25 @@ func NewUploadService(
 	hub *events.Hub,
 	audit *AuditService,
 ) *UploadService {
+	// 暂存目录的绝对路径：跨进程传给 agent 时必须是绝对的（见 uploadsRoot 注释）
+	root := cfg.UploadsDir()
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+
 	return &UploadService{
-		cfg:      cfg,
-		log:      log,
-		settings: settingsSvc,
-		uploads:  uploads,
-		jobs:     jobs,
-		users:    users,
-		albums:   albums,
-		storage:  storage,
-		ag:       ag,
-		hub:      hub,
-		audit:    audit,
+		cfg:         cfg,
+		log:         log,
+		settings:    settingsSvc,
+		uploads:     uploads,
+		jobs:        jobs,
+		users:       users,
+		albums:      albums,
+		storage:     storage,
+		ag:          ag,
+		hub:         hub,
+		audit:       audit,
+		uploadsRoot: root,
 	}
 }
 
@@ -1115,7 +1129,7 @@ func (s *UploadService) requeuePending() (requeued, dropped int) {
 			}
 			originalName = up.OriginalName
 			if filePath == "" {
-				filePath = filepath.Join(s.cfg.UploadsDir(), filepath.Base(up.FileName))
+				filePath = filepath.Join(s.uploadsRoot, filepath.Base(up.FileName))
 			}
 
 			if _, statErr := os.Stat(filePath); statErr != nil {
@@ -1206,7 +1220,7 @@ func (s *UploadService) TempPathFor(originalName string) (string, error) {
 
 	now := time.Now()
 	// 随机目录让同名文件互不覆盖，同时保留可读的原始文件名
-	dir := filepath.Join(s.cfg.UploadsDir(), now.Format("2006"), now.Format("01"), id.New())
+	dir := filepath.Join(s.uploadsRoot, now.Format("2006"), now.Format("01"), id.New())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", Wrap(response.CodeInternal, "创建暂存目录失败", err)
 	}

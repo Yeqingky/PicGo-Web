@@ -9,6 +9,7 @@ import (
 	"github.com/YeqingKy/PicGo-Web/server/internal/middleware"
 	"github.com/YeqingKy/PicGo-Web/server/internal/response"
 	"github.com/YeqingKy/PicGo-Web/server/internal/service"
+	"github.com/YeqingKy/PicGo-Web/server/internal/settings"
 )
 
 // PluginHandler 处理插件端点（/plugins/**）。
@@ -16,17 +17,24 @@ import (
 // 权限：**全部需要 admin**（插件是服务器上的任意代码，D45 的 plugin.* 日志）。
 type PluginHandler struct {
 	plugins *service.PluginService
-	log     *slog.Logger
+	// settings 用于读取 `picgo.npmRegistry`（npm 搜索源，见 plugin_search.go）。
+	// 可为 nil（此时搜索回退官方 registry）。
+	settings *settings.Service
+	log      *slog.Logger
 }
 
 // NewPluginHandler 构造。
-func NewPluginHandler(plugins *service.PluginService, log *slog.Logger) *PluginHandler {
-	return &PluginHandler{plugins: plugins, log: log}
+func NewPluginHandler(plugins *service.PluginService, settingsSvc *settings.Service, log *slog.Logger) *PluginHandler {
+	return &PluginHandler{plugins: plugins, settings: settingsSvc, log: log}
 }
 
 // Register 注册路由。
+//
+// ⚠️ `/search` 必须在 `/:name` 之前注册：gin 的路由树里
+// 静态段优先于参数段，但显式前置更清晰、也避免将来改动踩坑。
 func (h *PluginHandler) Register(g *gin.RouterGroup) {
 	g.GET("", h.List)
+	g.GET("/search", h.Search)
 	g.POST("/install", h.Install)
 	g.POST("/uninstall", h.Uninstall)
 	g.POST("/update", h.Update)

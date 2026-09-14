@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/YeqingKy/PicGo-Web/server/internal/response"
@@ -215,12 +216,21 @@ func (c *httpClient) call(ctx context.Context, method, path string, body any, ti
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		// 区分超时与其他网络错误，但对调用方都是「agent 不可用」
-		msg := "内核（picgo-agent）不可用"
-		if errors.Is(err, context.DeadlineExceeded) {
-			msg = "内核响应超时"
+		// 区分超时与其他网络错误，但对调用方都是「agent 不可用」。
+		//
+		// 消息里**带上底层原因**：否则用户只看到「内核不可用」而无法判断
+		// 是「没启动」「端口不对」还是「令牌不匹配」（这三种最常见）。
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			return NewError(response.CodeAgentUnavailable,
+				fmt.Sprintf("内核响应超时（%s，超过 %s）", c.baseURL, timeout), err)
+		case errors.Is(err, syscall.ECONNREFUSED):
+			return NewError(response.CodeAgentUnavailable,
+				fmt.Sprintf("内核未启动或端口未监听（%s）：请检查 PICGO_WEB_AGENT_AUTOSTART / PICGO_WEB_AGENT_URL", c.baseURL), err)
+		default:
+			return NewError(response.CodeAgentUnavailable,
+				fmt.Sprintf("无法连接内核（%s）：%v", c.baseURL, err), err)
 		}
-		return NewError(response.CodeAgentUnavailable, msg, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

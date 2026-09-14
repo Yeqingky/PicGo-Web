@@ -20,7 +20,7 @@ func NewSettingRepo(db *gorm.DB) *SettingRepo { return &SettingRepo{db: db} }
 // GetSystem 按 key 取一条；不存在返回 (nil, nil)。
 func (r *SettingRepo) GetSystem(key string) (*model.SystemSetting, error) {
 	var s model.SystemSetting
-	err := r.db.Where("key = ?", key).First(&s).Error
+	err := r.db.Where("Key = ?", key).First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -35,9 +35,9 @@ func (r *SettingRepo) ListSystem(category string) ([]model.SystemSetting, error)
 	var out []model.SystemSetting
 	q := r.db.Model(&model.SystemSetting{})
 	if category != "" {
-		q = q.Where("category = ?", category)
+		q = q.Where("Category = ?", category)
 	}
-	if err := q.Order("key ASC").Find(&out).Error; err != nil {
+	if err := q.Order("Key ASC").Find(&out).Error; err != nil {
 		return nil, wrap(err)
 	}
 	return out, nil
@@ -55,7 +55,7 @@ func (r *SettingRepo) UpsertSystem(s *model.SystemSetting) error {
 
 // DeleteSystem 删除一个站点配置（通常不需要：恢复默认值用 Upsert 写空即可）。
 func (r *SettingRepo) DeleteSystem(key string) error {
-	return wrap(r.db.Where("key = ?", key).Delete(&model.SystemSetting{}).Error)
+	return wrap(r.db.Where("Key = ?", key).Delete(&model.SystemSetting{}).Error)
 }
 
 // ---- UserSettings ----
@@ -63,7 +63,7 @@ func (r *SettingRepo) DeleteSystem(key string) error {
 // GetUser 取某用户的一个偏好；不存在返回 (nil, nil)。
 func (r *SettingRepo) GetUser(userUID, key string) (*model.UserSetting, error) {
 	var s model.UserSetting
-	err := r.db.Where("user_uid = ? AND key = ?", userUID, key).First(&s).Error
+	err := r.db.Where("UserUID = ? AND Key = ?", userUID, key).First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -76,7 +76,7 @@ func (r *SettingRepo) GetUser(userUID, key string) (*model.UserSetting, error) {
 // ListUser 返回某用户的全部偏好。
 func (r *SettingRepo) ListUser(userUID string) ([]model.UserSetting, error) {
 	var out []model.UserSetting
-	if err := r.db.Where("user_uid = ?", userUID).Order("key ASC").Find(&out).Error; err != nil {
+	if err := r.db.Where("UserUID = ?", userUID).Order("Key ASC").Find(&out).Error; err != nil {
 		return nil, wrap(err)
 	}
 	return out, nil
@@ -94,7 +94,7 @@ func (r *SettingRepo) UpsertUser(s *model.UserSetting) error {
 
 // DeleteUser 删除某用户的一个偏好（恢复默认）。
 func (r *SettingRepo) DeleteUser(userUID, key string) error {
-	return wrap(r.db.Where("user_uid = ? AND key = ?", userUID, key).
+	return wrap(r.db.Where("UserUID = ? AND Key = ?", userUID, key).
 		Delete(&model.UserSetting{}).Error)
 }
 
@@ -109,7 +109,7 @@ func NewThemeConfigRepo(db *gorm.DB) *ThemeConfigRepo { return &ThemeConfigRepo{
 // ListByTheme 返回某主题的全部配置值。
 func (r *ThemeConfigRepo) ListByTheme(themeID string) ([]model.ThemeConfig, error) {
 	var out []model.ThemeConfig
-	if err := r.db.Where("theme_id = ?", themeID).Order("key ASC").Find(&out).Error; err != nil {
+	if err := r.db.Where("ThemeID = ?", themeID).Order("Key ASC").Find(&out).Error; err != nil {
 		return nil, wrap(err)
 	}
 	return out, nil
@@ -118,7 +118,7 @@ func (r *ThemeConfigRepo) ListByTheme(themeID string) ([]model.ThemeConfig, erro
 // Get 取某主题的一个配置项；不存在返回 (nil, nil)。
 func (r *ThemeConfigRepo) Get(themeID, key string) (*model.ThemeConfig, error) {
 	var c model.ThemeConfig
-	err := r.db.Where("theme_id = ? AND key = ?", themeID, key).First(&c).Error
+	err := r.db.Where("ThemeID = ? AND Key = ?", themeID, key).First(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -140,13 +140,13 @@ func (r *ThemeConfigRepo) Upsert(c *model.ThemeConfig) error {
 
 // Delete 删除某主题的一个配置项（恢复 manifest 默认值）。
 func (r *ThemeConfigRepo) Delete(themeID, key string) error {
-	return wrap(r.db.Where("theme_id = ? AND key = ?", themeID, key).
+	return wrap(r.db.Where("ThemeID = ? AND Key = ?", themeID, key).
 		Delete(&model.ThemeConfig{}).Error)
 }
 
 // DeleteByTheme 清理某主题的全部配置值（D95：卸载主题时由管理员显式触发）。
 // 返回删除的行数。
 func (r *ThemeConfigRepo) DeleteByTheme(themeID string) (int64, error) {
-	tx := r.db.Where("theme_id = ?", themeID).Delete(&model.ThemeConfig{})
+	tx := r.db.Where("ThemeID = ?", themeID).Delete(&model.ThemeConfig{})
 	return tx.RowsAffected, wrap(tx.Error)
 }

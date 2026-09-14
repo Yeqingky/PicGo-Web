@@ -156,10 +156,26 @@ func RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, 
 	NewLogHandler(logSvc, d.Log).Register(api.Group("/logs", requireAdmin...))
 
 	// 插件（admin）
-	NewPluginHandler(pluginSvc, d.Log).Register(api.Group("/plugins", requireAdmin...))
+	NewPluginHandler(pluginSvc, d.Settings, d.Log).Register(api.Group("/plugins", requireAdmin...))
 
 	// 邮件测试（admin）
 	emailHandler.RegisterAdmin(api.Group("", requireAdmin...))
+
+	// 设置（用户级对所有登录用户；站点级需 admin —— 内部自行判断）
+	NewSettingsHandler(SettingsDeps{
+		Settings: d.Settings,
+		SetRepo:  repository.NewSettingRepo(d.DB.DB),
+		Audit:    auditSvc,
+		AuthMW:   d.AuthMW,
+		Log:      d.Log,
+	}).Register(api.Group("", requireLogin...))
+
+	// 仪表盘统计（需登录；内部按角色决定 scope）
+	NewStatsHandler(StatsDeps{
+		DB:    d.DB.DB,
+		Users: repository.NewUserRepo(d.DB.DB),
+		Log:   d.Log,
+	}).Register(api.Group("", requireLogin...))
 
 	return &BusinessServices{
 		Storage: storageSvc,

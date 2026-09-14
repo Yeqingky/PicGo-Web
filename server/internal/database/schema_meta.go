@@ -30,7 +30,7 @@ func CurrentVersion(db *gorm.DB) (int64, error) {
 	}
 
 	var meta model.SchemaMeta
-	err := db.Where("id = ?", model.SchemaMetaSingletonID).First(&meta).Error
+	err := db.Where("ID = ?", model.SchemaMetaSingletonID).First(&meta).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, nil
 	}
@@ -45,7 +45,7 @@ func writeVersion(tx *gorm.DB, version int64) error {
 	now := model.Now()
 
 	var meta model.SchemaMeta
-	err := tx.Where("id = ?", model.SchemaMetaSingletonID).First(&meta).Error
+	err := tx.Where("ID = ?", model.SchemaMetaSingletonID).First(&meta).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		meta = model.SchemaMeta{
 			ID:        model.SchemaMetaSingletonID,

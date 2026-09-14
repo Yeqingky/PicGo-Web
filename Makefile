@@ -62,17 +62,28 @@ deps-web: ## 安装前端依赖
 # ===========================================================================
 
 .PHONY: dev
-dev: ## 启动全部开发进程（Go + agent + Vite）
-	@echo "→ 同时启动 server / agent / web（Ctrl-C 全部退出）"
-	@$(MAKE) -j3 server agent web
+dev: ## 启动全部开发进程（Go 会在自己内部拉起 agent，另起 Vite）
+	@echo "→ 启动 server（内含 agent 子进程）+ web（Ctrl-C 全部退出）"
+	@echo "  · Go 后端 :8080  · agent 子进程 127.0.0.1:36678  · 前端 5173"
+	@echo "  ⚠️  不要把 agent 与 dev 同时跑：端口会冲突（单独调试 agent 用 make dev-no-agent）"
+	@$(MAKE) -j2 server web
+
+.PHONY: dev-no-agent
+dev-no-agent: ## 三进程分开调试（agent 不由 Go 拉起）
+	@echo "→ 同时启动 server / agent / web（agent 走 tsx watch，带热重载）"
+	@$(MAKE) -j3 server-no-agent agent web
 
 .PHONY: server
-server: ## 只启动 Go 后端（默认 :8080）
+server: ## 启动 Go 后端（默认 :8080；会自动拉起 agent 子进程）
 	@cd $(SERVER_DIR) && go run ./cmd/picgo-web
 
+.PHONY: server-no-agent
+server-no-agent: ## 启动 Go 后端，但不拉起 agent（配合 make agent 使用）
+	@cd $(SERVER_DIR) && PICGO_WEB_AGENT_AUTOSTART=false go run ./cmd/picgo-web
+
 .PHONY: agent
-agent: ## 只启动 picgo-agent 侧车（默认 127.0.0.1:36678）
-	@cd $(AGENT_DIR) && pnpm dev
+agent: ## 只启动 picgo-agent 侧车（tsx watch 热重载；需与 Go 共享同一令牌）
+	@cd $(AGENT_DIR) && PICGO_AGENT_TOKEN="$${PICGO_WEB_AGENT_TOKEN:-$$(cat $(SERVER_DIR)/../data/agent-token.txt 2>/dev/null || true)}" pnpm dev
 
 .PHONY: web
 web: ## 只启动前端 Vite dev server（/api 代理到 :8080）

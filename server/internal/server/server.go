@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/YeqingKy/PicGo-Web/server/internal/agent"
 	"github.com/YeqingKy/PicGo-Web/server/internal/auth"
 	"github.com/YeqingKy/PicGo-Web/server/internal/config"
 	"github.com/YeqingKy/PicGo-Web/server/internal/database"
@@ -39,6 +40,12 @@ type Deps struct {
 	Log      *slog.Logger
 	DB       *database.DB
 	Settings *settings.Service
+
+	// AgentStatus 是 picgo-agent 的**缓存**健康状态（可为 nil，此时一律视为不可用）。
+	//
+	// 由后台探测协程刷新；handler 只读内存快照，
+	// 从而让 /healthz 保持「不查库、不调 agent」的轻量语义（docs/API.md §10）。
+	AgentStatus *agent.StatusHolder
 
 	// SigningKey 是加密主密钥（D19）。
 	//
@@ -228,20 +235,42 @@ func (a themeAuditor) Log(ctx context.Context, e theme.AuditEntry) {
 
 // handleHealthz 是唯一不使用统一信封的端点（容器探针）。
 func (a *App) handleHealthz(c *gin.Context) {
+	// 注意：这里**不调 agent**（healthz 必须轻量：容器与前端都会高频轮询），
+	// 只读后台探测协程刷新的内存快照。
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"version": Version,
-		"agent":   "down", // W4 接入后改为真实探测结果
+		"agent":   a.deps.AgentStatus.Get().Label(),
 		"uptime":  int64(time.Since(startedAt).Seconds()),
 	})
 }
 
 // handleSystemInfo 返回版本与运行信息。
 func (a *App) handleSystemInfo(c *gin.Context) {
+	st := a.deps.AgentStatus.Get()
+
+	// Picgo 段：仅在 agent 可用时才有意义；不可用时给出 LastError 便于排查
+	picgo := gin.H{}
+	switch {
+	case st.Up:
+		picgo = gin.H{
+			"Version":     st.Version,
+			"ConfigPath":  st.ConfigPath,
+			"PluginCount": st.PluginCount,
+			"PID":         st.PID,
+		}
+	case st.Error != "":
+		picgo = gin.H{"LastError": st.Error}
+	}
+
 	response.OK(c, gin.H{
 		"Version":        Version,
 		"SchemaVersion":  database.SchemaVersion,
 		"DatabaseDriver": string(a.deps.DB.Driver),
+		// AgentStatus：up | down（前端据此显示「内核不可用」提示）
+		"AgentStatus":    st.Label(),
+		"AgentCheckedAt": st.CheckedAt,
+		"Picgo":          picgo,
 		"SiteName":       a.deps.Settings.GetString("site.name"),
 		"ThemeActive":    a.deps.Settings.GetString("theme.active"),
 		"Uptime":         int64(time.Since(startedAt).Seconds()),

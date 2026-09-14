@@ -118,6 +118,43 @@ tx.Exec(`CREATE INDEX IF NOT EXISTS idx_x ON "Uploads" ("UserUID", "CreatedAt" D
 
 迁移里有 `createIndex` 助手统一处理，**新增索引请用组合索引表（`migrate_vN.go`）而不是手写**。
 
+### 3.2.1 ⚠️ 手写 SQL 片段的列名也必须是 PascalCase（**踩过**）
+
+GORM 的 `Where("...")` / `Select("...")` / `Order("...")` / `Group("...")` 参数是**原样拼进 SQL** 的，
+GORM **不会**帮你做命名转换。因此必须写模型字段名：
+
+```go
+// ✅ 正确
+db.Where("UserUID = ?", uid)
+db.Select("(CreatedAt + ?) / 86400 * 86400 AS Day", offset).Group("Day")
+db.Order("CreatedAt DESC")
+
+// ❌ 错误：SQLite 大小写不敏感所以**本地测不出来**，PostgreSQL 直接报
+//    column "user_uid" does not exist
+db.Where("user_uid = ?", uid)
+db.Order("created_at DESC")
+```
+
+**为什么危险**：SQLite 对 ASCII 大小写不敏感，`user_uid` 能匹配到 `UserUID` 列 →
+本地与 CI 全绿；一到 PostgreSQL 就炸。**新增任何手写 SQL 片段后，务必在 PgSQL 上跑一次。**
+
+### 3.2.2 ⚠️ 跨进程传递的路径必须是绝对路径（**踩过**）
+
+Go 与 picgo-agent 是**两个进程、不同 cwd**：
+Go 的 cwd 是启动目录，agent 的 cwd 是 `picgo-agent/`（它要据此找 `node_modules`）。
+
+```go
+// ✅ 正确：传给 agent 前绝对化
+root := cfg.UploadsDir()
+if abs, err := filepath.Abs(root); err == nil { root = abs }
+
+// ❌ 错误：agent 会解析成 picgo-agent/data/uploads/... → 「文件不存在」
+uploadPath := filepath.Join(cfg.UploadsDir(), name)  // "./data/uploads/x.png"
+```
+
+**规则**：凡是写入 `Uploads.FilePath` / `UploadResults.FilePath` / 传给 agent `UploadRequest.Path`
+的路径，**一律绝对路径**。本地文件路径不经 API 暴露，绝对化不影响安全性。
+
 ### 3.4 迁移（D16/D77）
 
 - **只追加，不修改已发布条目**：`schemaMigrations` 末尾加一条 + `SchemaVersion` +1

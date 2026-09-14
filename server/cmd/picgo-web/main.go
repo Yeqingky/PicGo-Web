@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -138,11 +139,18 @@ func run() error {
 		)
 	})
 
-	// ---- 9. picgo-agent 客户端（W4）----
+	// ---- 9. picgo-agent（W4）----
+	//
+	// 先建 Supervisor（解析并落盘共享令牌），再用同一令牌建 Client：
+	// 令牌不一致会导致 agent 拒绝所有请求（这正是"内核不可用"的常见原因）。
 	//
 	// `PICGO_WEB_AGENT_MOCK=true` 时用内存 mock（无 Node 环境也能跑通全链路：
 	// 前端联调、CI、以及本项目的端到端自测）。
-	agentClient, err := buildAgentClient(cfg, settingsSvc, log)
+	supervisor, err := buildAgentSupervisor(cfg, log)
+	if err != nil {
+		return fmt.Errorf("准备 picgo-agent 共享令牌失败: %w", err)
+	}
+	agentClient, err := buildAgentClient(cfg, settingsSvc, supervisor.Token(), log)
 	if err != nil {
 		return err
 	}
@@ -154,13 +162,47 @@ func run() error {
 	// 上传进度由 Go 自己发（带 UserUID 才能正确按用户投递），因此不上桥。
 	hub := events.New(log)
 
+	// agent 状态的**缓存快照**：后台刷新，handler 只读内存（保持 /healthz 轻量）。
+	agentStatus := agent.NewStatusHolder()
+
+	// ---- 10.5 拉起 agent 子进程（D7）----
+	//
+	// Autostart=true 时由 Go 拉起并注入令牌；进程退出会按退避策略重启，
+	// 连续失败超上限后放弃（避免无限重启把日志刷爆）。
+	if !cfg.AgentMock {
+		// 关键：supervisor 是**唯一**知道「进程刚就绪」的组件。
+		// 若只靠 probeAgentLoop 的 30s 轮询，用户会看到长达 30 秒的
+		// 「内核不可用」误报。因此在这里立刻刷新状态快照。
+		supervisor.OnStateChange(func(up bool, err error) {
+			probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			agentStatus.Refresh(probeCtx, agentClient)
+			cancel()
+
+			if up {
+				hub.PublishNotice("info", "内核已就绪")
+				return
+			}
+			msg := "内核不可用：上传与插件功能暂时失效"
+			if err != nil {
+				msg += "（" + err.Error() + "）"
+			}
+			hub.PublishNotice("error", msg)
+		})
+		if err := supervisor.Start(context.Background()); err != nil {
+			// 不阻断启动：其余功能（登录、图库浏览）仍可用，只是上传/插件不可用
+			log.Error("拉起 picgo-agent 失败，上传与插件功能将不可用", "err", err)
+			hub.PublishNotice("error", "内核启动失败："+err.Error())
+		}
+	}
+
 	// ---- 11. HTTP 服务 ----
 	app, err := server.New(server.Deps{
-		Cfg:        cfg,
-		Log:        log,
-		DB:         db,
-		Settings:   settingsSvc,
-		SigningKey: key,
+		Cfg:         cfg,
+		Log:         log,
+		DB:          db,
+		Settings:    settingsSvc,
+		AgentStatus: agentStatus,
+		SigningKey:  key,
 	})
 	if err != nil {
 		return fmt.Errorf("装配 HTTP 服务失败: %w", err)
@@ -192,7 +234,7 @@ func run() error {
 	defer cancelRun()
 
 	// ---- 13. agent 健康探测 + 事件桥（后台）----
-	go probeAgentLoop(runCtx, agentClient, settingsSvc, hub, log)
+	go probeAgentLoop(runCtx, agentClient, settingsSvc, hub, agentStatus, log)
 	go events.NewAgentBridge(events.AgentBridgeConfig{
 		EventsURL: agentClient.EventsURL(),
 		Token:     agentClient.Token(),
@@ -231,6 +273,8 @@ func run() error {
 	defer stopCancel()
 	biz.Upload.Shutdown(stopCtx)
 	sched.Stop()
+	// 关停 agent：先请求其优雅退出，超时再强杀
+	supervisor.Stop(stopCtx)
 	hub.Close()
 	cancelRun()
 
@@ -238,24 +282,67 @@ func run() error {
 }
 
 // buildAgentClient 按配置构造 agent 客户端（真实 HTTP 或内存 mock）。
-func buildAgentClient(cfg *config.Config, settingsSvc *settings.Service, log *slog.Logger) (agent.Client, error) {
+// buildAgentSupervisor 解析共享令牌并构造侧车进程管理器。
+//
+// 它在 `buildAgentClient` **之前**调用，因为：
+//   - 令牌的最终值由 Supervisor 决定（env → 文件 → 新生成）
+//   - 生成的令牌要落盘（0600），并注入给子进程
+//   - Client 必须用**同一个**令牌，否则 agent 会 401
+func buildAgentSupervisor(cfg *config.Config, log *slog.Logger) (*agent.Supervisor, error) {
+	// configPath 必须是**绝对路径**：agent 以自身 cwd 解析相对路径，
+	// 相对路径会落到 picgo-agent/ 下而不是 dataDir（踩过）。
+	configPath := cfg.PicgoConfigPath()
+	if abs, err := filepath.Abs(configPath); err == nil {
+		configPath = abs
+	}
+
+	extra := map[string]string{
+		"PICGO_AGENT_CONFIG_PATH": configPath,
+	}
+	if v := strings.TrimSpace(cfg.AgentNpmRegistry); v != "" {
+		extra["PICGO_AGENT_NPM_REGISTRY"] = v
+	}
+	if v := strings.TrimSpace(cfg.AgentNpmProxy); v != "" {
+		extra["PICGO_AGENT_NPM_PROXY"] = v
+	}
+	if v := strings.TrimSpace(cfg.AgentUploadProxy); v != "" {
+		extra["PICGO_AGENT_UPLOAD_PROXY"] = v
+	}
+
+	var command []string
+	if raw := strings.TrimSpace(cfg.AgentCommand); raw != "" {
+		command = strings.Fields(raw)
+	}
+
+	return agent.NewSupervisor(agent.SupervisorConfig{
+		Autostart: cfg.AgentAutostart,
+		BaseURL:   cfg.AgentURL,
+		Token:     cfg.AgentToken,
+		TokenFile: cfg.AgentTokenFile(),
+		AgentDir:  cfg.AgentDir,
+		Command:   command,
+		ExtraEnv:  extra,
+		Log:       log,
+	})
+}
+
+// buildAgentClient 构造 agent HTTP 客户端。
+//
+// token 必须来自 Supervisor（保证与子进程一致）。
+func buildAgentClient(cfg *config.Config, settingsSvc *settings.Service, token string, log *slog.Logger) (agent.Client, error) {
 	if cfg.AgentMock {
 		log.Warn("agent 使用 MOCK 模式（仅用于联调/测试，不会真正上传）")
 		return agent.NewMock(agent.MockConfig{
 			BaseURL: cfg.AgentURL,
-			Token:   cfg.AgentToken,
+			Token:   token,
 			Log:     log,
 			TempDir: cfg.PicgoConfigDir(),
 		}), nil
 	}
 
-	if strings.TrimSpace(cfg.AgentToken) == "" {
-		log.Warn("PICGO_WEB_AGENT_TOKEN 为空：agent 会拒绝所有请求（请检查侧车配置）")
-	}
-
 	return agent.New(agent.Config{
 		BaseURL:        cfg.AgentURL,
-		Token:          cfg.AgentToken,
+		Token:          token,
 		Log:            log,
 		RequestTimeout: 30 * time.Second,
 		// 上传超时每次现取，使 `upload.itemTimeoutSeconds` 的改动即时生效
@@ -277,8 +364,29 @@ func jwtMgrForRun(signingKey []byte) *auth.JWTManager {
 // probeAgentLoop 周期性探测 agent 健康，并在状态**发生变化**时发系统通知。
 //
 // 只报「变化」：每 30 秒推一次「内核正常」会变成噪音。
-func probeAgentLoop(ctx context.Context, ag agent.Client, settingsSvc *settings.Service, hub *events.Hub, log *slog.Logger) {
-	ticker := time.NewTicker(30 * time.Second)
+// agentStatusProbeFastWindow 是「启动快速探测期」。
+//
+// 为什么要它：agent 子进程启动需要 1~3 秒（Node 冷启动），
+// 而稳定期的探测间隔是 30 秒。若第一次探测恰好在就绪前，前端就要等 30 秒
+// 才看到「内核已就绪」。前 60 秒用 2 秒间隔可以把这个误报窗口压到最小。
+const agentStatusProbeFastWindow = 60 * time.Second
+
+// agentStatusProbeFastInterval / agentStatusProbeInterval 见上方说明。
+const (
+	agentStatusProbeFastInterval = 2 * time.Second
+	agentStatusProbeInterval     = 30 * time.Second
+)
+
+func probeAgentLoop(
+	ctx context.Context,
+	ag agent.Client,
+	settingsSvc *settings.Service,
+	hub *events.Hub,
+	status *agent.StatusHolder,
+	log *slog.Logger,
+) {
+	startedAtProbe := time.Now()
+	ticker := time.NewTicker(agentStatusProbeFastInterval)
 	defer ticker.Stop()
 
 	wasUp := false
@@ -286,27 +394,34 @@ func probeAgentLoop(ctx context.Context, ag agent.Client, settingsSvc *settings.
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 
-		_, err := ag.Healthz(probeCtx)
-		up := err == nil
+		// Refresh 同时更新缓存快照（/healthz 与 /system/info 读它）
+		snap := status.Refresh(probeCtx, ag)
+		up := snap.Up
+
 		switch {
 		case up && !wasUp:
-			log.Info("picgo-agent 已就绪")
-			if hub != nil && wasUp != up {
+			log.Info("picgo-agent 已就绪",
+				"version", snap.Version, "plugins", snap.PluginCount)
+			if hub != nil {
 				hub.PublishNotice("info", "内核已就绪")
 			}
 		case !up && wasUp:
-			log.Warn("picgo-agent 不可用", "err", err)
+			log.Warn("picgo-agent 不可用", "err", snap.Error)
 			if hub != nil {
 				hub.PublishNotice("error", "内核不可用：上传与插件功能暂时失效")
 			}
 		case !up && !wasUp:
-			log.Debug("picgo-agent 仍不可用", "err", err)
+			log.Debug("picgo-agent 仍不可用", "err", snap.Error)
 		}
 		wasUp = up
 	}
 
 	check()
 	for {
+		// 快速期结束 → 换成 30s 间隔（省资源；此时 agent 状态已稳定）
+		if time.Since(startedAtProbe) > agentStatusProbeFastWindow {
+			ticker.Reset(agentStatusProbeInterval)
+		}
 		select {
 		case <-ctx.Done():
 			return
