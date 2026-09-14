@@ -1166,7 +1166,7 @@ themes/default/            默认首页主题的打包产物（manifest.json + i
 | **W6 Go 日志·邮件·删除** | ✅ **已完成** | 操作日志查询、SMTP 发信 + EmailLogs（不存正文）、远端删除（D47）、每日清理、插件管理 |
 | **W7 前端基座** | ✅ **已完成** | 设计 token（DESIGN §2 全量）、30 个 UI 组件、http/sse 客户端、Zustand store、路由三层守卫、登录页 |
 | **W8 前端页面** | ✅ **已完成** | 131 个源文件：上传（队列 + 进度插值）、图库（无缩略图 + 管理员 Tab）、相册、任务、日志、存储（动态表单）、插件、主题、站点、用户、设置 |
-| **W9 Lsky 兼容 + 静态托管** | ⚠️ **部分完成** | ✅ 静态托管与 SPA/主题分发（`/assets`、`/theme-assets`、SPA 回退、防穿越）；❌ **Lsky 兼容层 `/api/v1/**` 待实现** |
+| **W9 Lsky 兼容 + 静态托管** | ✅ **已完成** | 静态托管（`/assets` vs `/theme-assets`、SPA 回退、防穿越）；**Lsky v1 兼容层**（9 端点 + Lsky 信封 + Laravel 分页 + 令牌可重复签发）；**启动路由冲突检测**；Dockerfile（四阶段） |
 | **W10 主题系统** | ✅ **已完成** | `manifest.Pages` 自行注册 + 最长前缀匹配 + 认证页/后台永久保留 + 内嵌兜底 + seed + `ThemeConfigs` 三级兜底 + zip 安装 9 条校验 |
 
 ### 端到端验证结论（真实跑通，非推断）
@@ -1184,14 +1184,21 @@ site/config  Site + Theme(Pages=["/"]) + Settings(BackgroundURL 默认 ACG API)
 前端         经 Vite 代理用真实后端账号登录成功 · 图库列表可取
 ```
 
-### 下一步（剩余工作）
+### 端到端验证（可复现脚本）
 
-1. **W9 的 Lsky v1 兼容层**：`/api/v1/{tokens,profile,strategies,upload,images,albums}`，
-   **保持 snake_case 与 `{status,message,data}` 信封**（外部冻结契约），复用现有 service；
-   启动时加**路由冲突检测**（与 `/api/web/v1` 不得重叠）。
-2. **Dockerfile**：`deploy/docker/Dockerfile` 多阶段（前端构建 → agent 构建 → Go 编译 → 运行时）。
-3. **agent 自动拉起**：`PICGO_WEB_AGENT_AUTOSTART=true` 时的子进程生命周期 + 退避重启。
-4. **前端 e2e**：目前只有 typecheck/lint/build。
+| 命令 | 覆盖 | 实测 |
+|---|---|---|
+| `make e2e-theme` | 主题分发算法、认证页保留、资源前缀隔离、防穿越、内嵌兜底、zip 安装 9 条校验、卸载规则 | ✅ **73 项通过** |
+| `make e2e-lsky` | Lsky 9 端点、**信封一致性（11 个错误场景）**、令牌可重复签发、冲突检测 | ✅ **20 项通过** |
+| `make e2e-all` | 两者串行 | — |
+
+### 剩余工作
+
+1. **前端 e2e**：目前只有 typecheck/lint/build；端到端靠上面两个脚本（服务端视角）。
+2. **Docker 构建实测**：`deploy/docker/Dockerfile` 已通过指令自检，
+   但**本机无 docker，未实际 `docker build` 过**。首次构建请留意：
+   - `make vendor` 必须先生成 `deploy/vendor/picgo-*.tgz`（Dockerfile 依赖它）
+   - Go 阶段用 `COPY --from=web-builder` 取前端产物（跨阶段不能用 `cp`）
 
 ## 与决策的偏差
 

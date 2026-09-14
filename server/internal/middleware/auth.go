@@ -17,6 +17,16 @@ import (
 // ginKeyUser 是在 gin.Context 中存放当前用户的键。
 const ginKeyUser = "auth.currentUser"
 
+// SetCurrentUser 把当前用户写入 gin context。
+//
+// 导出用途：**Lsky 兼容层**需要自己实现鉴权中间件（它的失败响应必须是
+// Lsky 信封而不是内部信封，见 internal/lsky/auth.go），但成功后
+// 必须写入**同一个键**，否则 `CurrentUser(c)` 取不到用户 ——
+// 而所有 service 都依赖它。暴露这个函数比让调用方硬编码字符串安全得多。
+func SetCurrentUser(c *gin.Context, u *model.User) {
+	c.Set(ginKeyUser, u)
+}
+
 // apiTokenTouchIntervalSeconds 限制 API token 的 LastUsedAt 写库频率。
 //
 // 每个请求都写库会放大写压力（SQLite 更是单写），因此只在距上次更新
@@ -53,6 +63,37 @@ func (a *Auth) RequireAuth() gin.HandlerFunc {
 
 		c.Set(ginKeyUser, u)
 		// 把 UID 放进 request context，便于 service/logger 关联日志
+		ctx := logger.WithUserUID(c.Request.Context(), u.UID)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// RequireAPIToken 要求请求携带**有效的 API Token**（`Authorization: Bearer pcw_...`）。
+//
+// 用途：**Lsky 兼容层**（`/api/v1/**`）。
+//
+// 为什么不直接用 RequireAuth：Lsky 客户端是**程序**，语义上只应认长期令牌。
+// 若同时接受浏览器 Cookie，会出现「用户浏览器恰好登录着 → 第三方脚本请求被当成该用户」
+// 这种难以排查的隐式行为；也避免内部 JWT 的 15 分钟过期影响长跑的客户端。
+func (a *Auth) RequireAPIToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bearer := auth.BearerToken(c)
+		if bearer == "" || !auth.IsAPIToken(bearer) {
+			response.Abort(c, response.CodeUnauthorized)
+			return
+		}
+
+		u, code := a.userByAPIToken(bearer)
+		if u == nil {
+			if code == response.CodeOK {
+				code = response.CodeUnauthorized
+			}
+			response.Abort(c, code)
+			return
+		}
+
+		c.Set(ginKeyUser, u)
 		ctx := logger.WithUserUID(c.Request.Context(), u.UID)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()

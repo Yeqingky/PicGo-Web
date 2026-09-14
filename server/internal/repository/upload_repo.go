@@ -102,6 +102,20 @@ func (r *UploadRepo) List(f UploadListFilter) ([]model.Upload, int64, error) {
 }
 
 // FindByUID 按 UID 查一条；不存在返回 ErrNotFound。
+// ListByJob 返回某批次（job）下的全部图片，按 Seq 升序。
+//
+// 用途：Lsky 同步上传在 job 完成后回查成功项（入队时 item 状态可能还是 queued）。
+func (r *UploadRepo) ListByJob(jobUID string) ([]model.Upload, error) {
+	if jobUID == "" {
+		return nil, nil
+	}
+	var out []model.Upload
+	if err := r.db.Where("JobUID = ?", jobUID).Order("UID ASC").Find(&out).Error; err != nil {
+		return nil, wrap(err)
+	}
+	return out, nil
+}
+
 func (r *UploadRepo) FindByUID(uid string) (*model.Upload, error) {
 	var u model.Upload
 	if err := r.db.Where(map[string]any{"UID": uid}).First(&u).Error; err != nil {

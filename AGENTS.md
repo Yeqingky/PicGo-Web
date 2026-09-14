@@ -275,6 +275,46 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 
 ---
 
+## 7.5 Lsky v1 兼容层（`/api/v1/**`）
+
+**目的**：让 PicGo 桌面端 / PicList / uPic / ShareX **直接把本站当图床**。
+
+| 项 | 值 |
+|---|---|
+| 前缀 | **`/api/v1/**`**（与内部 `/api/web/v1` 隔离，D80） |
+| 信封 | **`{status: bool, message, data}`** |
+| 字段命名 | **snake_case**（外部冻结契约，**不受 D81 约束**） |
+| 时间格式 | **字符串 `Y-m-d H:i:s`**（内部是 Unix 秒） |
+| 分页 | **Laravel 形状**（`data.data` 双重 data + `current_page`/`last_page`/…） |
+| 鉴权 | **只认 API Token**（`pcw_...`）；不认 Cookie / 内部 JWT |
+| 令牌签发 | `POST /tokens` 每次签发**新的**并**吊销同名旧令牌**（客户端会反复登录） |
+
+### 三条血泪教训（代码里都有注释，改动前先读）
+
+1. **信封必须隔离到「未匹配路由」级别**：`/api/v1/**` 的 404 也必须是 Lsky 信封，
+   否则客户端拿不到 `status`，表现为「调用成功但报未知错误」。
+   实现分散在 `internal/lsky/auth.go`（鉴权失败）与 `internal/theme/routes.go`（NoRoute）。
+2. **`POST /tokens` 要能重复调用**：内部 `CreateAPIToken` 拒绝同名令牌（防用户混淆），
+   直接调用第二次就 409。Lsky 层必须先吊销同名旧令牌再签发。
+3. **启动时做路由冲突检测**：`lsky.DetectConflicts` 检查 `/api/v1/**` 下是否有非契约路径，
+   发现即 fail fast（防将来有人把内部接口误挂到保留区）。
+
+### 契约路径（9 条，`lsky.ReservedPaths` 是外部冻结的保留集）
+
+```
+POST   /api/v1/tokens        邮箱+密码换令牌
+DELETE /api/v1/tokens        清空当前用户全部令牌
+GET    /api/v1/profile       资料（字节 + KB 双套字段）
+GET    /api/v1/strategies    存储列表（免鉴权）
+POST   /api/v1/upload        multipart 上传（**同步**返回 URL）
+GET    /api/v1/images        Laravel 分页
+DELETE /api/v1/images/{key}  按 UID 删除
+GET    /api/v1/albums        相册列表
+DELETE /api/v1/albums/{id}   删相册（**图片仅脱离，不删图**）
+```
+
+**验证**：`make e2e-lsky`（20 项，含信封一致性 11 个错误场景）。
+
 ## 8. PicGo-Core fork
 
 | 项 | 值 |
@@ -297,6 +337,7 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 - [ ] 新增接口后：**同步 `docs/API.md`**
 - [ ] 新增日志类型后：**同步 `model.LogTypes()`** 与 `docs/OPERATIONS.md`
 - [ ] 改动涉及设计/架构决策时：**在 `docs/DECISIONS.md` 追加新编号**，不要改历史条目
+- [ ] 改了 Lsky 层后跑 `make e2e-lsky`（信封一致性极易被改坏）
 - [ ] **本文件（AGENTS.md）已同步更新**
 
 ---
@@ -314,7 +355,7 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 | W6 Go 日志·邮件·删除·清理 | ✅ | 日志查询 + SMTP + EmailLogs + 远端删除 + 每日清理 + 插件管理 |
 | W7 前端基座 | ✅ | 设计 token + 30 个 UI 组件 + http/sse + store + 路由守卫 + 登录页 |
 | W8 前端页面 | ✅ | 上传/图库/相册/任务/日志/存储/插件/主题/站点/用户/设置，131 文件 |
-| W9 Lsky 兼容 + 静态托管 | ⚠️ **部分** | 静态托管与 SPA/主题分发已完成；**Lsky 兼容层（`/api/v1/**`）待实现** |
+| W9 Lsky 兼容 + 静态托管 | ✅ **已完成** | 静态托管（`/theme-assets` vs `/assets`、SPA 回退、防穿越）+ **Lsky v1 兼容层**（9 端点、Lsky 信封、启动冲突检测）+ Dockerfile |
 | W10 主题系统 | ✅ | manifest/Pages 分发/seed/内嵌兜底/ThemeConfigs/zip 安装 9 条校验 |
 
 ### 已实现的能力（端到端验证通过）
@@ -339,7 +380,6 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 
 | 项 | 说明 |
 |---|---|
-| **Lsky v1 兼容层** | `/api/v1/{tokens,profile,strategies,upload,images,albums}`（D52）；让 PicGo 桌面端/PicList/uPic/ShareX 可直接接入 |
-| Dockerfile | `deploy/docker/Dockerfile`（compose 已就绪，镜像构建文件待补） |
-| agent 自动拉起 | `PICGO_WEB_AGENT_AUTOSTART=true` 时的子进程生命周期管理（当前需手动或外部编排） |
-| 前端 e2e 测试 | 目前只有 typecheck/lint/build，无自动化浏览器测试 |
+| 前端 e2e 测试 | 只有 typecheck/lint/build；端到端验证靠 `scripts/e2e-*.sh`（服务端视角） |
+| Docker 构建实测 | `deploy/docker/Dockerfile` 已写好并通过指令自检，但**本机无 docker，未实际 build 过** |
+| 图片审核 / 水印 | 明确不做（D62）：后端不落盘，无字节流可处理 |

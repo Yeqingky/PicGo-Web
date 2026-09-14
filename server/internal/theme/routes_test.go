@@ -905,3 +905,91 @@ func truncate(s string) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// NoRoute 的信封选择（**实测踩到的 bug**）
+// ---------------------------------------------------------------------------
+
+// TestServePageEnvelopePerPrefix 校验未匹配路径按前缀使用**正确的信封**：
+//
+//	/api/v1/**  → Lsky 信封 `{status, message, data}`（外部冻结契约，D80/D52）
+//	/api/**     → 内部信封 `{Code, Message, Data}`
+//	页面路径    → HTML（SPA 回退）
+//
+// 为什么重要：Lsky 客户端按 `status` 字段判断成功与否。
+// 若 `/api/v1/**` 的未匹配路径返回内部信封，客户端拿不到 `status`，
+// 会表现为「调用成功但报未知错误」这种极难排查的现象。
+func TestServePageEnvelopePerPrefix(t *testing.T) {
+	env := newTestEnv(t)
+	engine := newTestRouter(env)
+
+	cases := []struct {
+		name       string
+		path       string
+		wantStatus int
+		// 期望的信封类型
+		wantLsky     bool
+		wantInternal bool
+	}{
+		{"Lsky 保留区未匹配", "/api/v1/nonexistent", http.StatusNotFound, true, false},
+		{"Lsky 保留区深层未匹配", "/api/v1/images/extra/deep", http.StatusNotFound, true, false},
+		{"内部 API 未匹配", "/api/web/v1/nonexistent", http.StatusNotFound, false, true},
+		{"内部 API 根未匹配", "/api/unknown", http.StatusNotFound, false, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(t, engine, http.MethodGet, tc.path, nil, "")
+			if w.Code != tc.wantStatus {
+				t.Fatalf("HTTP 应为 %d，实际 %d（body=%s）", tc.wantStatus, w.Code, w.Body.String())
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("响应不是合法 JSON: %v\n%s", err, w.Body.String())
+			}
+
+			if tc.wantLsky {
+				if _, ok := got["status"].(bool); !ok {
+					t.Errorf("应为 Lsky 信封（含 bool 的 status），实际: %s", w.Body.String())
+				}
+				if _, exists := got["Code"]; exists {
+					t.Errorf("不应出现内部信封字段 Code: %s", w.Body.String())
+				}
+			}
+			if tc.wantInternal {
+				if _, ok := got["Code"]; !ok {
+					t.Errorf("应为内部信封（含 Code），实际: %s", w.Body.String())
+				}
+				if _, exists := got["status"]; exists {
+					t.Errorf("不应出现 Lsky 信封字段 status: %s", w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+// TestServePagePagePathsFallbackToHTML 校验真正的页面路径仍回退到 HTML。
+func TestServePagePagePathsFallbackToHTML(t *testing.T) {
+	env := newTestEnv(t)
+	engine := newTestRouter(env)
+
+	for _, p := range []string{"/gallery", "/upload", "/some/deep/page"} {
+		w := do(t, engine, http.MethodGet, p, nil, "")
+		if w.Code != http.StatusOK {
+			t.Errorf("%s 应回退为页面（200），实际 %d", p, w.Code)
+			continue
+		}
+		body := w.Body.String()
+		if !isSPAResponse(body) && !strings.Contains(body, embeddedThemeMarker) {
+			t.Errorf("%s 应返回 HTML 页面，实际前 80 字符: %s", p, firstN(body, 80))
+		}
+	}
+}
+
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}

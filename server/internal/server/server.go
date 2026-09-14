@@ -55,10 +55,21 @@ type Deps struct {
 }
 
 // App 持有 HTTP 服务与装配好的路由。
+//
+// 另外暴露 W3 阶段装配出的**鉴权服务与中间件**：组合根（main）需要在
+// `server.New()` 之后挂载业务路由与 Lsky 兼容层，而它们必须复用**同一套**
+// 服务实例（尤其是 `middleware.Auth` —— 两个实例虽然功能等价，
+// 但重复构造会让「改了装配逻辑只生效一半」这类问题极难发现）。
 type App struct {
 	deps   Deps
 	engine *gin.Engine
 	http   *http.Server
+
+	// ---- W3 装配出的鉴权设施（供组合根复用）----
+	UserRepo *repository.UserRepo
+	TokenSvc *service.TokenService
+	UserSvc  *service.UserService
+	AuthMW   *middleware.Auth
 }
 
 // New 装配路由。
@@ -133,6 +144,12 @@ func (a *App) registerRoutes() error {
 
 	// ---- 鉴权中间件 ----
 	authMW := middleware.NewAuth(userRepo, tokenRepo, jwtMgr, a.deps.Log)
+
+	// 暴露给组合根（main 挂业务路由与 Lsky 层时复用同一套实例）
+	a.UserRepo = userRepo
+	a.TokenSvc = tokenSvc
+	a.UserSvc = userSvc
+	a.AuthMW = authMW
 
 	// ---- 健康检查（不使用信封、字段小写）----
 	a.engine.GET("/healthz", a.handleHealthz)

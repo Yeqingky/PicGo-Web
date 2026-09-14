@@ -120,6 +120,18 @@ func ServePage(svc *Service) gin.HandlerFunc {
 		// 必须在 SPA 回退之前拦下：否则一个拼错的接口路径会返回
 		// 200 + HTML，客户端很难看出自己调错了地址。
 		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			// ⚠️ `/api/v1/**` 是 **Lsky 保留区**，其未匹配路径必须用
+			// **Lsky 信封**（`{status, message, data}`）。若返回内部信封，
+			// 第三方客户端会解析失败（拿不到 `status` 字段），
+			// 表现为「调用成功但报未知错误」这种极难排查的现象（**实测踩到**）。
+			if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
+				c.JSON(http.StatusNotFound, gin.H{
+					"status":  false,
+					"message": "Not Found.",
+					"data":    nil,
+				})
+				return
+			}
 			response.Fail(c, response.CodeNotFound)
 			return
 		}

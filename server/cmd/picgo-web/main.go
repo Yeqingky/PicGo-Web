@@ -32,7 +32,7 @@ import (
 	"github.com/YeqingKy/PicGo-Web/server/internal/events"
 	"github.com/YeqingKy/PicGo-Web/server/internal/handler"
 	"github.com/YeqingKy/PicGo-Web/server/internal/logger"
-	"github.com/YeqingKy/PicGo-Web/server/internal/middleware"
+	"github.com/YeqingKy/PicGo-Web/server/internal/lsky"
 	"github.com/YeqingKy/PicGo-Web/server/internal/repository"
 	"github.com/YeqingKy/PicGo-Web/server/internal/scheduler"
 	"github.com/YeqingKy/PicGo-Web/server/internal/server"
@@ -215,7 +215,8 @@ func run() error {
 	// gin 的 NoRoute 与路由树是分开的，后注册路由完全安全。
 	//
 	// 若后续把 Agent / Hub 收进 server.Deps，只需把下面两块搬进 registerRoutes()。
-	authMW := middleware.NewAuth(userRepo, repository.NewTokenRepo(db.DB), jwtMgrForRun(key), log)
+	// 复用 server.New() 里装配好的鉴权中间件（同一套 repo/jwt，避免重复实例）
+	authMW := app.AuthMW
 	biz, err := handler.RegisterBusiness(app.Engine().Group("/api/web/v1"), handler.BusinessDeps{
 		DB:       db,
 		Cfg:      cfg,
@@ -228,6 +229,47 @@ func run() error {
 	})
 	if err != nil {
 		return fmt.Errorf("装配业务路由失败: %w", err)
+	}
+
+	// ---- 12.5 Lsky v1 兼容层（W9 / D52）----
+	//
+	// 挂在**根级 /api/v1**（与内部 /api/web/v1 前缀隔离，D80），
+	// 让 PicGo 桌面端 / PicList / uPic / ShareX 直接把本站当图床。
+	//
+	// `integration.lsky.enabled=false` 时不注册任何路由。
+	lskyEnabled := settingsSvc.GetBool("integration.lsky.enabled", true)
+	lskyHandler := lsky.New(lsky.Deps{
+		Cfg:        cfg,
+		Log:        log,
+		Settings:   settingsSvc,
+		Hub:        hub,
+		UsersSvc:   app.UserSvc,
+		Tokens:     app.TokenSvc,
+		Uploads:    biz.Upload,
+		Gallery:    biz.Gallery,
+		Albums:     biz.Album,
+		Storage:    biz.Storage,
+		Users:      app.UserRepo,
+		TokenRepo:  repository.NewTokenRepo(db.DB),
+		Logs:       repository.NewLogRepo(db.DB),
+		UploadRepo: repository.NewUploadRepo(db.DB),
+	})
+	lskyHandler.Register(app.Engine(), lskyEnabled)
+
+	// 启动自检：① 保留区无闯入 ② 契约路径全部注册（fail fast）
+	if lskyEnabled {
+		if conflicts := lsky.DetectConflicts(app.Engine()); len(conflicts) > 0 {
+			for _, c := range conflicts {
+				log.Error("Lsky 保留区被闯入", "route", c.Method+" "+c.Path)
+			}
+			return fmt.Errorf("检测到 %d 处路由冲突（详见上方日志）：内部 API 必须挂 /api/web/v1/**", len(conflicts))
+		}
+		if missing := lsky.VerifyContract(app.Engine()); len(missing) > 0 {
+			// 不 fail：少了某条契约路径只影响对应功能，不该阻止整个服务启动
+			log.Warn("Lsky 契约路径未全部注册（对应功能会返回 404）", "missing", missing)
+		} else {
+			log.Info("Lsky 契约自检通过", "endpoints", 9)
+		}
 	}
 
 	runCtx, cancelRun := context.WithCancel(context.Background())

@@ -74,11 +74,22 @@ RUN go mod download
 
 COPY server/ ./
 
-# 把阶段 1 的前端产物放进 go:embed 目录
-# （internal/webfs 用 //go:embed all:dist 嵌入，因此必须在 go build 之前就位）
+# 把阶段 1 的前端产物放进 go:embed 目录。
+#
+# ⚠️ 跨构建阶段**不能**用 `cp`（各阶段的文件系统互相隔离），必须 `COPY --from=`；
+#     否则这里会静默失败或复制不到东西，最终二进制里没有前端
+#     （表现为「服务起来了但所有页面 404」）。
+#     `internal/webfs` 用 `//go:embed all:dist` 嵌入，因此必须在 go build **之前**就位。
 RUN rm -rf internal/webfs/dist/assets && \
-    find internal/webfs/dist -maxdepth 1 -type f ! -name '.gitkeep' -delete && \
-    cp -r /build/web/dist/. internal/webfs/dist/
+    find internal/webfs/dist -maxdepth 1 -type f ! -name '.gitkeep' -delete
+
+COPY --from=web-builder /build/web/dist/ ./internal/webfs/dist/
+
+# 校验前端确实就位（否则早点失败，而不是产出一个没前端的二进制）
+RUN test -f internal/webfs/dist/index.html \
+    || (echo "错误：前端产物未进入 webfs/dist，go:embed 将嵌入空目录" && exit 1)
+RUN test -n "$(find internal/webfs/dist/assets -type f -print -quit 2>/dev/null)" \
+    || (echo "错误：webfs/dist/assets 为空" && exit 1)
 
 RUN go build -trimpath -ldflags "-s -w" -o /out/picgo-web ./cmd/picgo-web
 
