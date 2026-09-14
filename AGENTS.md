@@ -266,107 +266,43 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 
 ## 10. 当前进度
 
-| 工作流 | 状态 |
-|---|---|
-| W0 PicGo-Core fork 与补丁 | ✅ 已完成（`6419c2f`，250 单测 + lint 通过） |
-| W1 契约与骨架 | ✅ 已完成（docs 九份 + 根配置 + Makefile + compose） |
-| **W2 Go 基础设施** | ✅ **已完成**（config/logger/database/model/repository/crypto/id/settings/response/middleware/server + 测试） |
-| **W3 Go 鉴权与用户** | ✅ **已完成**（auth/service/handler + 首启引导） |
-| **W4 Agent 内核** | ✅ **已完成**（picgo-agent：168 单测 + typecheck + lint 通过） |
-| **W5 Go 业务（存储/上传队列/图库/相册）** | ✅ **已完成** |
-| **W6 Go 日志与邮件（含删除/清理/操作日志/回调）** | ✅ **已完成** |
-| W7 前端基座 | ⬜ 待开始 |
-| W8 前端页面 | ⬜ 待开始 |
-| W9 Lsky 兼容 + 静态托管 | ⬜ 待开始 |
-| W10 主题系统 | ⬜ 待开始 |
-
-
----
-
-## 11. W5/W6 交付说明（2026-02）
-
-### 新增包与文件
-
-| 包 | 文件 | 职责 |
+| 工作流 | 状态 | 关键产出 |
 |---|---|---|
-| `internal/agent` | `types.go` `dto.go` `client.go` `mock.go` `README.md` | picgo-agent 客户端（真实 HTTP + 内存 mock） |
-| `internal/events` | `hub.go` `bridge.go` `README.md` | 进程内 SSE 总线 + agent SSE 桥 |
-| `internal/mail` | `sender.go` | SMTP 发信（`net/smtp`，支持 ssl / starttls / none） |
-| `internal/scheduler` | `scheduler.go` | 每日日志清理（`time.Ticker`，不引 cron 库） |
-| `internal/repository` | `storage_repo.go` `upload_repo.go` `album_repo.go` `job_repo.go` `log_query_repo.go` `setting_query_repo.go` `user_ext_repo.go` | 新增数据访问；**并给 W3 的 `LogRepo`/`UserRepo`/`SettingRepo` 追加方法**（同包不同文件，无需改动 W3 文件） |
-| `internal/service` | `storage_service.go` `upload_service.go` `gallery_service.go` `album_service.go` `job_service.go` `log_service.go` `email_service.go` `plugin_service.go` `audit_adapter.go` `agent_err.go` | 业务规则与事务 |
-| `internal/handler` | `business.go`（**接线入口**）`storage.go` `upload.go` `album.go` `job.go` `log.go` `email.go` `plugin.go` `helpers.go` | HTTP 层 |
+| W0 PicGo-Core fork 与补丁 | ✅ | 分支 `PicGo-Web`（基线 v3.0.2），补丁 4 处，250 单测 |
+| W1 契约与骨架 | ✅ | docs 九份 + Makefile + .env.example + compose + AGENTS.md |
+| W2 Go 基础设施 | ✅ | config/logger/database/model/repository/crypto/id/settings/response/middleware/server |
+| W3 Go 鉴权与用户 | ✅ | auth/JWT/refresh 轮换/API Token/限流/防枚举/首启引导 + `/auth/*` `/users/*` |
+| W4 picgo-agent 侧车 | ✅ | hono 侧车 + 上传/图床/插件/删除/SSE/job，**168 单测** |
+| W5 Go 业务（存储/上传队列/图库/相册） | ✅ | agent 客户端 + 事件总线 + 队列（Job/JobItem）+ 配额/限流/重试/恢复 + 图库/相册/外链 |
+| W6 Go 日志·邮件·删除·清理 | ✅ | 日志查询 + SMTP + EmailLogs + 远端删除 + 每日清理 + 插件管理 |
+| W7 前端基座 | ✅ | 设计 token + 30 个 UI 组件 + http/sse + store + 路由守卫 + 登录页 |
+| W8 前端页面 | ✅ | 上传/图库/相册/任务/日志/存储/插件/主题/站点/用户/设置，131 文件 |
+| W9 Lsky 兼容 + 静态托管 | ⚠️ **部分** | 静态托管与 SPA/主题分发已完成；**Lsky 兼容层（`/api/v1/**`）待实现** |
+| W10 主题系统 | ✅ | manifest/Pages 分发/seed/内嵌兜底/ThemeConfigs/zip 安装 9 条校验 |
 
-### 接线方式（**重要**）
-
-`internal/server/server.go` 由 W10（主题）负责改造，因此本工作流的接线放在：
-
-1. **`handler.RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, error)`**
-   —— 挂载 `/storage/**`（admin）、`/uploads/**`、`/albums/**`、`/jobs/**`、`/events`、
-   `/logs/**`（admin）、`/plugins/**`（admin）、`/settings/mail/test`（admin）、
-   以及**免鉴权**的 `/auth/forgot-password` 与 `/auth/reset-password`。
-2. **`cmd/picgo-web/main.go`** —— 在 `server.New(...)` **之后**用 `app.Engine().Group("/api/web/v1")`
-   补挂业务路由（gin 的路由树与 NoRoute 分离，后注册完全安全），
-   并负责：构造 agent 客户端、构造 Hub、启动 agent 事件桥与健康探测、
-   执行存储配置 reconcile、启动上传队列、启动定时任务、**按序优雅关闭**。
-
-> 若将来把 `Agent`/`Hub` 收进 `server.Deps`，把上面第 2 步的两块搬进 `registerRoutes()` 即可。
-
-### 两个必须知道的坑（已修，均有回归测试）
-
-#### 1. `col()` 不能当 Updates/Update 的列名，`Group()` 要传裸名
-
-`internal/repository/col()` 只为**原样透传**的 SQL 片段加引号
-（`Where` 原生字符串 / `Select` / `Order` / `Exec` / `Raw`）。
-以下两种写法会让 GORM **再包一层引号**，生成非法 SQL：
-
-| 错误写法 | 生成的 SQL | 后果 |
-|---|---|---|
-| `Updates(map[string]any{col("X"): v})` | `SET """X"""=v` | `no such column: "X"` |
-| `Group(col("X"))` | `GROUP BY """X"""` | 同上（且**只在 SQLite 报错**，本地才看得见） |
-
-正确写法：`Update("X", v)` / `Updates(map[string]any{"X": v})` / `Group("X")`。
-
-> 这个坑第一次出现时表现为「上传成功但任务永远停在 queued」——
-> 因为结算任务时 `CountItemsByStatus` 静默失败。
-> 现已改为**一次查 items、在 Go 里计数**，不再依赖 `GROUP BY` + 列别名映射。
-
-#### 2. `Hub.Close()` 与订阅者 `defer cancel()` 相撞会 panic
-
-`Close()` 会关闭所有订阅者通道并清空订阅表；与此同时仍在运行的 SSE handler
-会执行 `defer cancel()`。若 `cancel()` 无条件 `close(ch)`，就会
-`panic: close of closed channel` —— **优雅关闭时反而崩掉**。
-
-修法：`cancel()` 在锁内判断订阅是否仍在表里，不在（说明 `Close` 已处理）就跳过。
-
-### 新增配置键
-
-**无。** 本工作流用到的键（`upload.*` / `log.*` / `mail.*` / `oauth.github.enabled`
-/ `integration.lsky.*`）都已在 `internal/config/defaults.go` 中声明。
-
-### 端到端验证（`PICGO_WEB_AGENT_MOCK=true` 实跑）
+### 已实现的能力（端到端验证通过）
 
 ```
-登录（首启随机密码）→ 未改密访问业务端点 40301 → 改密 → 重新登录
-→ 建存储配置（响应中 token 为 ******）
-→ 上传 2 张图 → 任务 succeeded / progress=100
-→ 图库列表（含 StorageName）→ 外链三种格式
-→ 统计（ByStorage / ByExtension 中文名可读）
-→ 删除（退还配额、如实报告「驱动不支持远端删除」）
-→ SSE 收到 job.started / upload.progress(0,100) / upload.finished / job.finished
-→ 操作日志（含密钥脱敏）→ 任务清理 → 插件/驱动/日志类型端点
+认证      邮箱登录 · JWT · refresh 轮换 · API Token · GitHub OAuth（需先绑定）· 限流 · 首启引导
+存储      多实例配置（同类型多条）· 密钥 AES-GCM 加密 · 能力探测 · 连通性测试 · reconcile 投影
+上传      队列（Job/JobItem）· 并发度可配（默认 1）· 配额 · 限流（默认禁用）· 重试 · 超时 · 重启恢复
+          魔法路径/文件名 · SSRF 防护 · SHA-256 记录（不去重）
+图库      我的/全部（管理员 Tab）· 筛选 · 批量 · 灯箱 · 外链三种格式 · 硬删除 + 可选远端删除 · 配额退还
+相册      CRUD · 移动 · ImageCount 冗余计数
+任务      Job 列表/详情/日志（SSE 实时）
+日志      操作日志查询（按用户隔离）· 类型清单 · 邮件日志（不存正文）· 每日清理
+邮件      SMTP（ssl/starttls/none）· 找回密码（UserSettings KV 承载令牌）
+插件      列表/搜索/README/安装/卸载/更新/启停（异步 job + 实时日志）
+主题      manifest.Pages 自行注册 · 最长前缀匹配 · 认证页与后台永久保留 · 内嵌兜底 · zip 安装
+静态      /assets（内置 SPA）· /theme-assets（主题）· SPA 回退 · 路径穿越防护
+前端      上传队列（进度插值）· 图库（无缩略图）· 相册 · 任务 · 日志 · 存储 · 插件 · 主题 · 站点 · 用户 · 设置
 ```
 
-安全断言全部通过：
+### 未完成
 
-| 断言 | 结果 |
+| 项 | 说明 |
 |---|---|
-| 存储配置响应 / 详情 / 列表**都不含密钥明文** | ✅ |
-| **审计日志** `Detail.Config.token` = `******` | ✅ |
-| **进程日志**不含密钥明文 | ✅ |
-| **数据库文件**不含密钥明文（AES-256-GCM） | ✅ |
-| 未登录 → 401；普通用户访问 admin 端点 → 40301（不是 40302） | ✅ |
-| 配额不足 → **40302**（与 40301 严格区分） | ✅ |
-| 普通用户 `Scope=all` 被**静默降级**为 `mine` | ✅ |
-| `RawOutput` 保留 picgo 原生字段名（含插件回写的 `sha`） | ✅ |
-| `manifest` 之外的 picgo 私有键（如 `uploaded`）不被清掉 | ✅ |
+| **Lsky v1 兼容层** | `/api/v1/{tokens,profile,strategies,upload,images,albums}`（D52）；让 PicGo 桌面端/PicList/uPic/ShareX 可直接接入 |
+| Dockerfile | `deploy/docker/Dockerfile`（compose 已就绪，镜像构建文件待补） |
+| agent 自动拉起 | `PICGO_WEB_AGENT_AUTOSTART=true` 时的子进程生命周期管理（当前需手动或外部编排） |
+| 前端 e2e 测试 | 目前只有 typecheck/lint/build，无自动化浏览器测试 |

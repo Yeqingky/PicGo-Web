@@ -105,17 +105,24 @@ build-agent: ## 构建 picgo-agent 产物
 	@cd $(AGENT_DIR) && pnpm build
 
 .PHONY: theme
-theme: ## 构建默认主题并打包为 themes/default/（含内嵌归档）
-	@echo "→ 构建默认主题"
-	@cd $(WEB_DIR) && pnpm build:theme
-	@mkdir -p $(THEME_DIR)
-	@node $(ROOT)/scripts/pack-theme.mjs
-	@echo "✓ $(THEME_DIR)/default/"
+theme: ## 导出默认主题到 themes/default/（源：server/internal/theme/embedded）
+	@echo "→ 导出默认主题"
+	@mkdir -p $(THEME_DIR)/default
+	@cp -r $(SERVER_DIR)/internal/theme/embedded/. $(THEME_DIR)/default/
+	@echo "✓ $(THEME_DIR)/default/（可直接放进 <dataDir>/themes/ 使用）"
+	@echo "  提示：二进制已内嵌同一份，作为主题缺失时的兜底（D94），无需手动部署。"
+
+.PHONY: vendor
+vendor: ## 把打过补丁的 PicGo-Core 打成 tarball 到 deploy/vendor/（Docker 构建需要）
+	@echo "→ 打包 PicGo-Core tarball"
+	@mkdir -p $(ROOT)/deploy/vendor
+	@rm -f $(ROOT)/deploy/vendor/picgo-*.tgz
+	@cd "$(CORE_DIR)" && pnpm build && pnpm pack --pack-destination $(ROOT)/deploy/vendor
+	@ls -lh $(ROOT)/deploy/vendor/
 
 .PHONY: pack
-pack: build theme ## 产出可发布包（二进制 + 主题 + PicGo-Core tarball）
-	@echo "→ 打包 PicGo-Core tarball（供 agent 生产依赖）"
-	@cd "$(CORE_DIR)" && pnpm build && pnpm pack --pack-destination $(ROOT)/deploy/vendor
+pack: build theme vendor ## 产出可发布包（二进制 + 主题 + PicGo-Core tarball）
+	@echo "✓ 发布包已就绪"
 
 # ===========================================================================
 # 质量门禁
@@ -153,8 +160,8 @@ fmt: ## 格式化 Go 代码
 # ===========================================================================
 
 .PHONY: docker-build
-docker-build: ## 构建 Docker 镜像
-	@docker compose build
+docker-build: vendor ## 构建 Docker 镜像（先 vendor PicGo-Core tarball）
+	@docker build -f deploy/docker/Dockerfile -t picgo-web:latest .
 
 .PHONY: docker-up
 docker-up: ## 启动（SQLite）

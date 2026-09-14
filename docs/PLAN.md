@@ -1157,26 +1157,41 @@ themes/default/            默认首页主题的打包产物（manifest.json + i
 
 | 工作流 | 状态 | 说明 |
 |---|---|---|
-| **W0 PicGo-Core fork 与补丁** | ✅ **已完成** | 分支 `PicGo-Web`（基线 `v3.0.2` / `f710083`），提交 **`6419c2f`**，6 个文件（+687/−16）：P1 `UploadOptions.uploader`、P2 per-context 配置覆盖、P3 `Lifecycle.step` 并发修复、P4 `contextData`；**13 个新单测**；`FORK-NOTES.md` 与 `pnpm-workspace.yaml`。已验证：`pnpm build` / `pnpm lint` / **250 单测全绿**；并发两批次各走各的 bucket（改前串、改后隔离）；端到端上传与事件序列正确 |
-| **W1 契约与骨架** | ✅ **已完成** | **契约**：`docs/` **九份**文档齐备（`README` 索引 + 8 份专题）+ `docs/research/` 两份调研报告。<br>**骨架**：`Makefile`（`deps` / `dev` / `build` / `theme` / `check` / `check-server` …，含 PicGo-Core 构建顺序）、`.env.example`、`docker-compose.yml`、`docker-compose.pgsql.yml`、`.gitignore`、`AGENTS.md`（项目级规范）、目录骨架（`server/` `picgo-agent/` `web/` `deploy/` `themes/`） |
-| **W2 Go 基础设施** | ✅ **已完成** | `server/` 12 个包：`config`(+`defaults.go` 全部业务配置键) / `logger` / `database`(双方言 + `NoLowerCase` + 版本化迁移 + 21 表 + 13 组合索引) / `model`(21 模型，均实现 `TableName()`) / `repository` / `crypto`(AES-256-GCM) / `id`(ULID + 前缀) / `settings`(三级兜底) / `response`(统一信封 + 错误码) / `middleware` / `server`(装配 + 优雅关闭) / `cmd/picgo-web`。<br>**验证**：`go vet` ✓、`go test ./...` 全绿（5 个测试文件）、`CGO_ENABLED=0` 静态编译 ✓（42 MB）；实际起服务后 `/healthz`、`/api/web/v1/system/info`、404 分支均正确；**查库确认 21 张表与列名全 PascalCase、13 个组合索引齐全、`SchemaMeta.Version = 1`** |
-| W3 Go 鉴权与用户 | ⬜ 待开始 | 依赖 W2 |
-| W4 Agent 内核 | ⬜ 待开始 | 可立即开工（依赖 W0 已完成、不依赖 W2） |
-| W5 Go 业务核心 | ⬜ 待开始 | 依赖 W2、W4 |
-| W6 Go 日志·邮件·删除 | ⬜ 待开始 | 依赖 W2、W3 |
-| W7 前端基座 | ⬜ 待开始 | 可立即开工（不依赖 W2/W4） |
-| W8 前端页面 | ⬜ 待开始 | 依赖 W7 |
-| W9 Lsky 兼容 + 部署与文档 | ⬜ 待开始 | 依赖 W3、W5、W6、W8；负责**内置 SPA 的 embed 接线** |
-| **W10 主题系统（首页）** | ⬜ 待开始 | 依赖 W2（`ThemeConfigs` 迁移 + 设置服务）、W7（默认主题构建入口）；与 W3/W4/W5/W6/W8 并行 |
+| **W0 PicGo-Core fork 与补丁** | ✅ **已完成** | 分支 `PicGo-Web`（基线 v3.0.2 / `f710083`），补丁 4 处（`UploadOptions.uploader` / `contextData` / per-context 配置覆盖 / `Lifecycle.step` 并发修复），**250 单测全绿**；实测并发两批次各走各的图床 |
+| **W1 契约与骨架** | ✅ **已完成** | `docs/` 九份 + `Makefile` + `.env.example` + `docker-compose{,.pgsql}.yml` + `.gitignore` + `AGENTS.md` |
+| **W2 Go 基础设施** | ✅ **已完成** | 12 个包；21 张表全 PascalCase + 13 个组合索引；**492 个测试用例**；`CGO_ENABLED=0` 静态编译 45MB |
+| **W3 Go 鉴权与用户** | ✅ **已完成** | bcrypt/JWT/refresh 轮换/API Token/GitHub OAuth/登录限流/防枚举/首启引导；`/auth/*`、`/users/*` |
+| **W4 Agent 内核** | ✅ **已完成** | hono 侧车：单文件同步上传（同时判返回值与 `failed` 事件）、图床多配置、能力探测、魔法路径、远端删除、SSE、插件管理；**168 单测** |
+| **W5 Go 业务核心** | ✅ **已完成** | 存储（DB→config.json 键级合并投影 + reconcile）、上传队列（Job/JobItem、并发度可配、配额、限流、重试、超时、重启恢复、优雅关闭）、图库、相册 |
+| **W6 Go 日志·邮件·删除** | ✅ **已完成** | 操作日志查询、SMTP 发信 + EmailLogs（不存正文）、远端删除（D47）、每日清理、插件管理 |
+| **W7 前端基座** | ✅ **已完成** | 设计 token（DESIGN §2 全量）、30 个 UI 组件、http/sse 客户端、Zustand store、路由三层守卫、登录页 |
+| **W8 前端页面** | ✅ **已完成** | 131 个源文件：上传（队列 + 进度插值）、图库（无缩略图 + 管理员 Tab）、相册、任务、日志、存储（动态表单）、插件、主题、站点、用户、设置 |
+| **W9 Lsky 兼容 + 静态托管** | ⚠️ **部分完成** | ✅ 静态托管与 SPA/主题分发（`/assets`、`/theme-assets`、SPA 回退、防穿越）；❌ **Lsky 兼容层 `/api/v1/**` 待实现** |
+| **W10 主题系统** | ✅ **已完成** | `manifest.Pages` 自行注册 + 最长前缀匹配 + 认证页/后台永久保留 + 内嵌兜底 + seed + `ThemeConfigs` 三级兜底 + zip 安装 9 条校验 |
 
-**下一步**
+### 端到端验证结论（真实跑通，非推断）
 
-- W0 / W1 / W2 均已完成 ✅
-- **批次 B 剩余两路可立即开工**：**W4**（Agent 内核，不依赖 W2 已完成的部分）、**W7**（前端基座，含默认主题构建入口）
-- **W3**（Go 鉴权与用户）已可开工（依赖的 W2 已完成）
-- **批次 C**：W5 / W6 / W8 / W10；W10 可与 W5 同步开工（不依赖上传链路）
+```
+主题分发      / → 主题首页(12KB)   /gallery 与 /login → 内置 SPA(2.8KB，二者一致)
+安全         /theme-assets 缺失 404 · /themes/** 404 · 路径穿越 404 · 认证页无法被接管
+site/config  Site + Theme(Pages=["/"]) + Settings(BackgroundURL 默认 ACG API)
+主题配置     读写 Source: default → db
+存储配置     密钥 AES-GCM 加密入库（DB 非明文）· 响应掩码 · 能力探测正确
+上传链路     2 文件 → job succeeded → 魔法路径 /2026/09/14/a-12345678 生效
+配额         累加 140B → 删除后退还(140→70) + FreedBytes 报告
+外链         markdown / url / html 三种格式正确
+日志         OperationLogs 写入 14 条 · 类型清单 25 项
+前端         经 Vite 代理用真实后端账号登录成功 · 图库列表可取
+```
 
----
+### 下一步（剩余工作）
+
+1. **W9 的 Lsky v1 兼容层**：`/api/v1/{tokens,profile,strategies,upload,images,albums}`，
+   **保持 snake_case 与 `{status,message,data}` 信封**（外部冻结契约），复用现有 service；
+   启动时加**路由冲突检测**（与 `/api/web/v1` 不得重叠）。
+2. **Dockerfile**：`deploy/docker/Dockerfile` 多阶段（前端构建 → agent 构建 → Go 编译 → 运行时）。
+3. **agent 自动拉起**：`PICGO_WEB_AGENT_AUTOSTART=true` 时的子进程生命周期 + 退避重启。
+4. **前端 e2e**：目前只有 typecheck/lint/build。
 
 ## 与决策的偏差
 

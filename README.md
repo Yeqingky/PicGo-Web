@@ -235,27 +235,81 @@ pnpm build              # 必须构建出 dist/，picgo-agent 通过 file: 依�
 
 ### 开发命令
 
+**最常用：一条命令起全部**
+
+```bash
+make dev
+```
+
+它并行启动三个进程（各自独立终端日志，Ctrl-C 一次全部退出）：
+
+| 进程 | 地址 | 说明 |
+|---|---|---|
+| `server` | <http://127.0.0.1:8080> | Go 后端（Gin） |
+| `agent` | <http://127.0.0.1:36678> | picgo-agent 侧车（仅 127.0.0.1，带 `X-Agent-Token`） |
+| `web` | <http://127.0.0.1:5173> | Vite dev server（`/api` 代理到 8080） |
+
+**分开跑（便于单独调试）**
+
 | 命令 | 作用 |
 |---|---|
-| `make dev` | 一键启动三端开发模式（Go 后端 + Node 侧车 + Vite dev server） |
-| `make server` | 只启动 Go 后端（Gin，默认 `:8080`） |
-| `make agent` | 只启动 Node 侧车（`picgo-agent`，默认 `127.0.0.1:36678`） |
-| `make web` | 只启动前端 Vite dev server（通过 proxy 转发 `/api` 到 Go 后端） |
+| `make server` | 只启动 Go 后端（`:8080`） |
+| `make agent` | 只启动 Node 侧车（`127.0.0.1:36678`） |
+| `make web` | 只启动前端 Vite dev server（代理 `/api` → `:8080`） |
 
-> 三端都有热重载。`make server` / `make agent` 可分开跑，便于单独调试；
-> 后端在 `PICGO_WEB_AGENT_AUTOSTART=false` 时不会自己拉起侧车，正好配合手动启动的 agent。
+**首次启动要做的两件事**
+
+1. **准备 PicGo-Core**（agent 依赖它，且 `dist/` 被 gitignore，必须先构建）：
+
+   ```bash
+   cd ../PicGo-Core        # 与 PicGo-Web 同级
+   git checkout PicGo-Web  # 补丁分支（基于上游 dev / v3.0.2）
+   pnpm install && pnpm build
+   ```
+
+   或直接 `make deps`（会一并安装三端依赖）。
+
+2. **拿管理员初始密码**：首次启动时后端会生成随机密码，出现在两处：
+
+   ```bash
+   # 方式一：看后端启动日志（WARN 级）
+   #   已创建初始管理员账号 ... password":"xxxxxxxx"
+
+   # 方式二：读文件（权限 0600）
+   cat data/initial-admin-password.txt
+   ```
+
+   登录邮箱固定为 **`admin@localhost`**；**首次登录会强制修改密码**，然后即可正常使用。
+
+**不装 Node 也能跑通全链路**（仅用于前端联调 / CI）：
+
+```bash
+PICGO_WEB_AGENT_MOCK=true make server
+# 或写进 .env：PICGO_WEB_AGENT_MOCK=true
+```
+
+**前端脱离后端开发**（走内置 mock）：
+
+```bash
+cd web && VITE_USE_MOCK=true pnpm dev
+```
+
+> 三端都有热重载；后端在 `PICGO_WEB_AGENT_AUTOSTART=false`（默认）时不会自己拉起侧车，
+> 正好配合手动启动的 agent。
 
 ### 构建与打包
 
 | 命令 | 作用 |
 |---|---|
-| `make theme` | 构建**默认首页主题**并打包为 `themes/default/`（`manifest.json` + `index.html` + `assets/`），同时产出供 Go `embed` 的压缩归档 |
-| `make build` | 构建全部产物：内置 SPA 的 `dist`（由 Go `embed` 进二进制）+ 默认首页主题归档 + 侧车产物 + Go 静态二进制（`CGO_ENABLED=0`） |
-| `make pack` | 产出可发布包：`PicGo-Core` 的 tarball、侧车产物、Docker 镜像 |
+| `make theme` | 导出默认主题到 `themes/default/`（源：`server/internal/theme/embedded`，自包含单文件） |
+| `make build` | 构建全部产物：内置 SPA 的 `dist`（同步到 `server/internal/webfs/dist` 供 `go:embed`）+ 侧车产物 + Go 静态二进制（`CGO_ENABLED=0`） |
+| `make vendor` | 把打过补丁的 PicGo-Core 打成 `deploy/vendor/picgo-*.tgz`（Docker 构建需要） |
+| `make pack` | 产出可发布包：二进制 + 主题 + PicGo-Core tarball |
+| `make docker-build` | 构建 Docker 镜像（自动先 `vendor`） |
 
-> **内置 SPA 仍用 `go:embed` 打进二进制**（图库 / 上传 / 后台 / 登录页等全部内置，单二进制、无外部依赖）。
-> `make theme` 额外产出的 `themes/default/` 是给用户一个**可替换的起点** ——
-> 放一份到 `./data/themes/` 就能改，也可以直接整包换掉。
+> **内置 SPA 用 `go:embed` 打进二进制**（图库 / 上传 / 后台 / 登录页等**全部内置**，单二进制、无外部依赖）。
+> `make theme` 导出的 `themes/default/` 是给用户一个**可替换的起点**（放一份到 `./data/themes/` 就能改），
+> 同时二进制里**也内嵌同一份**作为主题缺失/损坏时的兜底（D94）——因此即使 `data/themes/` 被删空也不会白屏。
 >
 > **本地验证主题**：`make theme` 后把 `themes/default/` 拷到 `./data/themes/default/`，
 > 用 `make server` 起后端访问 <http://localhost:8080> 即可看到效果（`make web` 的 Vite dev server 走的是内置 SPA）。
