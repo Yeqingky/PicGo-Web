@@ -22,7 +22,7 @@
  * 这样既满足「必须在 upload() 之前注册」，又天然支持并发（每个 ctx 有独立的 contextData）。
  */
 
-import type { IPicGo, IImgInfo } from 'picgo'
+import type { IPicGo, IImgInfo } from '@yeqingky/picgo-core'
 import type { Logger } from '../logger.js'
 import { buildFileName } from './template.js'
 

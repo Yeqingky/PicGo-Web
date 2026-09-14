@@ -22,6 +22,8 @@ type Status struct {
 	Error string `json:"Error"`
 	// CheckedAt 最近一次探测的 Unix 秒。
 	CheckedAt int64 `json:"CheckedAt"`
+	// Patches picgo-core 的补丁状态；缺失时并发上传不安全（见 PatchStatus）。
+	Patches PatchStatus `json:"Patches"`
 }
 
 // StatusHolder 缓存 agent 健康状态。
@@ -61,6 +63,7 @@ func (h *StatusHolder) SetUp(info *HealthzData) {
 		s.ConfigPath = info.ConfigPath
 		s.PluginCount = info.PluginsLoaded
 		s.PID = info.PID
+		s.Patches = info.Patches
 	}
 	h.mu.Lock()
 	h.status = s
@@ -77,7 +80,10 @@ func (h *StatusHolder) SetDown(err error) {
 		msg = err.Error()
 	}
 	h.mu.Lock()
-	h.status = Status{Up: false, Error: msg, CheckedAt: time.Now().Unix()}
+	// 保留上一次探测到的补丁状态：agent 挂掉不代表依赖变了，
+	// 清掉会让 UploadService 误以为「补丁没了」而误降并发。
+	patches := h.status.Patches
+	h.status = Status{Up: false, Error: msg, CheckedAt: time.Now().Unix(), Patches: patches}
 	h.mu.Unlock()
 }
 
@@ -99,6 +105,15 @@ func (h *StatusHolder) Refresh(ctx context.Context, client Client) Status {
 	}
 	h.SetUp(info)
 	return h.Get()
+}
+
+// PatchesComplete 报告 picgo-core 补丁是否齐备。
+//
+// ⚠️ **agent 不可用（Up=false）时返回 false**：此时无法确认补丁状态，
+// 保守地按「不可用」处理（并发上传宁可慢也不能错）。
+func (h *StatusHolder) PatchesComplete() bool {
+	st := h.Get()
+	return st.Up && st.Patches.Complete()
 }
 
 // Label 返回状态标签，供 `/healthz` 使用：

@@ -18,6 +18,7 @@ import { createContext } from './context.js'
 import { buildApp } from './http/server.js'
 import { registerMagicPathHook } from './picgo/rename.js'
 import { getPicgo } from './picgo/instance.js'
+import { patchStatus } from './picgo/patch.js'
 
 function readInt(key: string, fallback: number): number {
   const raw = process.env[key]
@@ -86,6 +87,22 @@ async function main(): Promise<void> {
         picgoVersion: ctx.picgoVersion,
         node: process.version
       })
+
+      // 补丁探测：缺失时**立即告警**（并发上传不安全），并把结果暴露给 Go
+      // （Go 侧会据此把 upload.concurrency 强制降到 1，见 internal/agent）
+      const patches = patchStatus()
+      if (patches.UploaderTarget && patches.ContextData) {
+        log.info('picgo-core 补丁已就位（支持按次指定图床与事件归属）', {
+          pkg: `${patches.PackageName}@${patches.PackageVersion}`
+        })
+      } else {
+        log.warn('picgo-core 缺少本项目所需补丁 —— 并发上传不安全，Go 侧将强制降级为单并发', {
+          pkg: `${patches.PackageName}@${patches.PackageVersion}`,
+          uploaderTarget: patches.UploaderTarget,
+          contextData: patches.ContextData,
+          reason: patches.Error ?? '(未提供原因)'
+        })
+      }
     }
   )
 

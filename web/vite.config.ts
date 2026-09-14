@@ -10,6 +10,9 @@ import { defineConfig } from 'vite'
 //  1. base 必须是 "/"，产物通过 /assets/** 提供（由 go:embed web/dist 打进二进制）
 //     —— 主题的资源前缀是 /theme-assets/**，两者不得混用
 //  2. dev server 把 /api 代理到 Go 后端（同源，避免 CORS；Cookie 也能正常下发）
+// API 代理目标：默认本地 Go 服务；容器环境由 compose 注入服务名（见 docker-compose-dev.yml）
+const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080'
+
 export default defineConfig({
   base: '/',
   plugins: [react(), tailwindcss()],
@@ -20,14 +23,19 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    host: true, // 绑 0.0.0.0：容器/局域网内可访问（本地开发无副作用）
     proxy: {
-      // 内部 API + Lsky 兼容层 + 健康检查都在 /api 与 /healthz 下
+      // 内部 API + Lsky 兼容层 + 健康检查都在 /api 与 /healthz 下。
+      //
+      // 代理目标可由 `VITE_API_PROXY_TARGET` 覆盖：
+      //   · 宿主直接 `pnpm dev`        → 默认 http://127.0.0.1:8080
+      //   · docker compose 开发环境     → http://server:8080（compose 服务名）
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: API_PROXY_TARGET,
         changeOrigin: true,
       },
       '/healthz': {
-        target: 'http://127.0.0.1:8080',
+        target: API_PROXY_TARGET,
         changeOrigin: true,
       },
     },

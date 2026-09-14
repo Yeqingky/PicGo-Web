@@ -932,7 +932,7 @@ web/
 
 > **`themes/default/` 是构建产物，不是手写目录。**
 
-**来源与生成方式**（由 `make theme` 完成，详见 `PLAN.md` W10）：
+**来源与生成方式**（源在 `server/internal/theme/embedded/`，二进制内嵌同一份作兜底；详见 `PLAN.md` W10）：
 
 ```
 ① 主题外壳（手写，位于仓库内，由实现时确定具体路径）
@@ -975,7 +975,7 @@ web/
 |---|---|---|
 | F0 | tokens.css + `components/ui/*` 基座 + AppShell + 路由骨架 + 亮暗色切换 | 能渲染空壳页面，亮暗色正常 |
 | F1 | `lib/http.ts` + `types/api.ts` + 登录/忘记密码/首登改密（**永久内置**） | 登录流程通（后端可用前用 mock） |
-| F2 | **默认首页主题**（`themes/default/`，**独立构建单元**）：Hero + 能力 + 场景 + FAQ + CTA + Footer | 与截图布局一致；**背景图直接引 `BackgroundURL`，无任何判断**（§6.2）；资源走 `/theme-assets/**`；产出可被 `go:embed` 的压缩归档（`make theme`） |
+| F2 | **默认首页主题**（源在 `server/internal/theme/embedded/`）：Hero + 能力 + 场景 + FAQ + CTA + Footer | 与截图布局一致；**背景图直接引 `BackgroundURL`，无任何判断**（§6.2）；资源走 `/theme-assets/**`；同一份被 `go:embed` 作为兜底（D94） |
 | F3 | 上传页 + 队列 + SSE 进度 | 能真实上传并看到进度 |
 | F4 | 图库（瀑布流/列表/筛选/批量/灯箱/外链复制，**不做缩略图** D84） | 图库可用 |
 | F5 | 相册 + 任务页 | 整理功能可用 |
@@ -1058,4 +1058,4 @@ web/
 - 本文档提到的 `theme.*` 操作日志类型（`theme.install` / `theme.uninstall` / `theme.activate` /
   `theme.rescan` / `theme.settings.update` / `theme.settings.clear` / `theme.error`）以
   `DECISIONS.md` D96 与 `OPERATIONS.md` 的类型表为准。
-- 构建目标名（`make theme`）与 `PLAN.md` W10 保持一致。
+- 默认主题的源目录（`server/internal/theme/embedded/`）与 `PLAN.md` W10 保持一致。

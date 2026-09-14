@@ -4,7 +4,7 @@
  * 这是一个**显式容器**（不是全局单例），因此单元测试可以构造独立的实例。
  */
 
-import type { IPicGo } from 'picgo'
+import type { IPicGo } from '@yeqingky/picgo-core'
 import type { AgentEnv } from './env.js'
 import type { Logger } from './logger.js'
 import type { CapabilityCache } from './picgo/capability.js'

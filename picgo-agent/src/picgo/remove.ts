@@ -26,7 +26,7 @@
  * 因此 Go 侧只把它当作「远端删除的尝试结果」，本地记录无论如何都会删。
  */
 
-import type { IPicGo } from 'picgo'
+import type { IPicGo } from '@yeqingky/picgo-core'
 import { describeError } from '../errors.js'
 import type { Logger } from '../logger.js'
 import type { RawImgInfo, RemoveData } from '../types.js'

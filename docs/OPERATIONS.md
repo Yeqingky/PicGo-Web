@@ -1050,13 +1050,39 @@ DELETE /api/web/v1/users/{uid}（admin）
 > 完整补丁说明见 [`PICGO-INTEGRATION.md`](./PICGO-INTEGRATION.md)。
 > 本节只讲**它如何影响运行机制**。
 
-### 10.1 当前状态
+### 10.1 当前状态与**依赖来源**
 
 - fork 仓库 `Github-me:YeqingKy/PicGo-Core`，分支 **`PicGo-Web`**，基线上游 `dev` @ v3.0.2。
 - 补丁**已落地**（提交 `6419c2f`），含 4 项改动：
   P1 `UploadOptions.uploader`（按次指定图床）、P2 per-context 配置覆盖、
   P3 `Lifecycle.step` 实例字段 → 局部变量（修并发串扰）、P4 `UploadOptions.contextData`。
 - **自维护，不提交上游**（D48）；上游更新时以 `dev` 为基线 rebase（D51）。
+- **本项目从 npm 安装它**：`@yeqingky/picgo-core`（fork 的版本线独立，从 `1.0.0` 起）。
+  不再使用本地 `file:../../PicGo-Core` 依赖，也不需要 vendor tarball。
+
+**补丁状态在运行时也被探测**（因为这直接决定并发是否安全）：
+
+| 层 | 位置 | 失败时的行为 |
+|---|---|---|
+| 构建期 | `deploy/docker/Dockerfile` | 断言 dist 含 `contextData` → **构建失败** |
+| 运行时 | `picgo-agent/src/picgo/patch.ts` → `/healthz.Patches` | 缺失时 `agent.StatusHolder.PatchesComplete() = false` |
+
+`UploadService.concurrency()` 会读它：**补丁不全就把并发强制降到 1**，
+并写一条 WARN + 系统通知（`system.notice`）。
+
+```
+agent 未就绪          → 保守 false → 并发 1
+agent 就绪但补丁缺失   → false      → 并发 1 + WARN + 通知
+agent 就绪且补丁齐备   → true       → 并发 = upload.concurrency
+agent 中途掉线        → 保守 false → RefreshConcurrency() 降回 1
+```
+
+`probeAgentLoop` 在 agent 状态**变化时**回调 `UploadService.RefreshConcurrency()`，
+所以启动时因 agent 未就绪而保守取的 1，会在 agent 就绪后自动升到配置值
+（**不需要重启**）。
+
+单测：`internal/service/upload_w5_test.go` 的
+`TestConcurrencyForcedToOneWithoutPatch`（降级 + 恢复）、`TestConcurrencyClamped`（上下限）。
 
 ### 10.2 两条运行路径
 
@@ -1259,7 +1285,7 @@ Go 订阅 agent SSE（internal/agent 的常驻 reader）
 | **删除图片后图床上文件还在** | 该驱动插件未实现 `remove`，或删除时 agent 不可用 | 1. 查该存储的 `Capabilities.SupportsRemoteDelete`<br>2. 若为 `false` → **预期行为**（D47），UI 应已提示「该驱动不支持远端删除」<br>3. 若为 `true` 但仍残留 → 查 `OperationLogs` 中该条的 `Detail.Reason`<br>4. 常见原因：插件删除需要额外字段（如 GitHub 的 `sha`），而 `UploadResults.RawOutput` 缺失（历史数据）→ 无法删除，只能手工清理 |
 | **存储配置改了但上传还是用旧的** | reconcile 未执行（agent 不可用时配置只落了 DB，标记 `SyncPending`） | 1. 查 `StorageConfigs.Metadata` 里的 `SyncPending`<br>2. 确认 agent 状态为 `up`，然后触发 reconcile（重启或等自动触发）<br>3. 用 `GET /api/web/v1/picgo/config`（脱敏）核对 `picBed.uploader` 是否与 DB 的 `IsDefault` 一致 |
 | **魔法路径没生效** | 该驱动不支持自定义远端路径 | 1. 查 `Capabilities.SupportsPathTemplate`<br>2. 若为 `false` → 已按 D44 降级为「文件名前缀」，在文件名里能看到路径片段<br>3. 若为 `true` 但路径没变 → 查 agent 是否在 `beforeUploadPlugins` 里注册了 rename 钩子（**必须在 `upload()` 之前注册**），且 `PathTemplate` 已随请求下发 |
-| **把并发度调到 2 之后，图片传错了存储驱动**（或出现莫名其妙的覆盖） | 用的是**未打补丁**的 picgo（例如依赖被换回 npm 原版），`uploader` 选项被忽略，`picBed.uploader` 被并发互相覆盖 | 1. 查 Go 日志有无 `picgo uploader-target patch not detected; forcing concurrency=1`（§10.4）<br>2. 查 agent 的 `picgo` 依赖是否指向本地 `file:../../PicGo-Core` 的 `PicGo-Web` 分支，且该分支已 `pnpm build`（`dist/` 被 gitignore，**必须先 build**）<br>3. 确认 `PicGo-Core` 分支为 `PicGo-Web`（含提交 `6419c2f`）<br>4. 若确实无补丁 → 保持 `upload.concurrency = 1`（这是正确行为，不是故障） |
+| **把并发度调到 2 之后，图片传错了存储驱动**（或出现莫名其妙的覆盖） | 用的是**未打补丁**的 picgo-core（例如依赖被换回上游 `picgo`），`UploadOptions.uploader` 被忽略，`picBed.uploader` 被并发互相覆盖 | 1. 先看**是否真的生效了 2 并发**：补丁缺失时服务会**自动强制降级为 1**（不会真并发）<br>2. 查 Go 日志有无 `picgo-core 补丁缺失，并发上传不安全 —— 已强制降级为单并发`<br>3. 查 agent 日志有无 `picgo-core 缺少本项目所需补丁`<br>4. 查 `GET /healthz` 的 `Patches` 字段（或 `GET /api/web/v1/system/info` 的 `Picgo`）<br>5. 确认 `picgo-agent/package.json` 依赖是 **`@yeqingky/picgo-core`**（不是上游 `picgo`）<br>6. 若确实缺补丁 → **这是正确行为，不是故障**：保持 `upload.concurrency = 1`，或把依赖换回 `@yeqingky/picgo-core` 后重建镜像 |
 | **上传主题 zip 失败** | 未通过安装校验（§8.9 的 9 条） | 1. 看返回的错误码与消息：`40001` = 校验不过，`40901` = 目标目录已存在（需勾「覆盖」）<br>2. 逐项对照 §8.9：**Zip Slip**（含 `..` 或绝对路径的 entry 会被拒）、含 **symlink** entry、超过 `theme.maxPackageBytes` / `theme.maxExtractBytes` / `theme.maxFileBytes` / `theme.maxFiles`、`manifest.json` 超过 `theme.maxManifestBytes`<br>3. 检查 zip 结构：根（或唯一顶层目录）下必须有 `manifest.json` **且其 `ID` 与目录名一致**，并有 `index.html`<br>4. 阈值可在 `SystemSettings` 调（键名见 DATA-MODEL.md §7.4 的 `category=theme`）<br>5. 失败会清理临时目录，**不会留下半个主题**；若目标目录已存在残留，手工删除后重试 |
 | **主题的 JS / CSS 加载 404** | 主题构建时**没配 `base: '/theme-assets/'`**，资源引用仍指向默认的 `/assets/`——那是**内置 SPA 的目录**，自然找不到 | 1. 打开 DevTools → Network，看失败请求的路径：若形如 `/assets/index-xxx.js` 而该文件属于主题 → 就是本问题<br>2. 主题工程里把 Vite 的 `base` 设为 **`/theme-assets/`** 重新构建、重新上传（或替换目录后「重新扫描」）<br>3. 确认 `<dataDir>/themes/<ID>/assets/` 里确实有对应文件（`GET /theme-assets/**` 就是从这读）<br>4. **不要**把主题资源放进 `/assets/` 试图绕过——那个前缀永远属于内置 SPA，会被内置资源覆盖（§8.6） |
 ---

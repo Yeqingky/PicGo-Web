@@ -231,6 +231,16 @@ func run() error {
 		return fmt.Errorf("装配业务路由失败: %w", err)
 	}
 
+	// ---- 12.2 并发安全闸门（补丁探测）----
+	//
+	// `UploadOptions.uploader` 是我们给 PicGo-Core 打的补丁。若依赖被换成上游原版，
+	// 并发上传会**静默传错图床**（互相覆盖 picBed.uploader）。
+	// 因此把「补丁是否齐备」接给上传服务：不齐备时强制单并发。
+	//
+	// agent 未就绪时 PatchesComplete() 返回 false（保守），
+	// agent 就绪且补丁齐备后由 probeAgentLoop 的回调触发 RefreshConcurrency() 升上去。
+	biz.Upload.SetPatchChecker(agentStatus.PatchesComplete)
+
 	// ---- 12.5 Lsky v1 兼容层（W9 / D52）----
 	//
 	// 挂在**根级 /api/v1**（与内部 /api/web/v1 前缀隔离，D80），
@@ -276,7 +286,11 @@ func run() error {
 	defer cancelRun()
 
 	// ---- 13. agent 健康探测 + 事件桥（后台）----
-	go probeAgentLoop(runCtx, agentClient, settingsSvc, hub, agentStatus, log)
+	go probeAgentLoop(runCtx, agentClient, settingsSvc, hub, agentStatus, log, func() {
+		// agent 就绪/掉线时并发上限会变（见 UploadService.concurrency），
+		// 这里让它立即重新评估 —— 否则启动时保守取的 1 会一直用下去。
+		biz.Upload.RefreshConcurrency()
+	})
 	go events.NewAgentBridge(events.AgentBridgeConfig{
 		EventsURL: agentClient.EventsURL(),
 		Token:     agentClient.Token(),
@@ -426,6 +440,9 @@ func probeAgentLoop(
 	hub *events.Hub,
 	status *agent.StatusHolder,
 	log *slog.Logger,
+	// onChange 在 agent 状态**发生变化**时调用（含首次就绪与掉线）。
+	// 用途：让上传服务重新评估并发度（补丁齐备才能 > 1）。
+	onChange func(),
 ) {
 	startedAtProbe := time.Now()
 	ticker := time.NewTicker(agentStatusProbeFastInterval)
@@ -447,6 +464,14 @@ func probeAgentLoop(
 			if hub != nil {
 				hub.PublishNotice("info", "内核已就绪")
 			}
+			// 补丁状态此时才可知 —— 若并发配置 > 1 且补丁齐备，这里会升上去
+			if !snap.Patches.Complete() {
+				msg := snap.Patches.Describe()
+				log.Warn("picgo-core 补丁不完整，上传将保持单并发", "reason", msg)
+				if hub != nil {
+					hub.PublishNotice("warn", "内核缺少必要补丁：上传已强制单并发。"+msg)
+				}
+			}
 		case !up && wasUp:
 			log.Warn("picgo-agent 不可用", "err", snap.Error)
 			if hub != nil {
@@ -454,6 +479,11 @@ func probeAgentLoop(
 			}
 		case !up && !wasUp:
 			log.Debug("picgo-agent 仍不可用", "err", snap.Error)
+		}
+
+		// 状态发生变化 → 通知调用方重新评估（例如并发度）
+		if up != wasUp && onChange != nil {
+			onChange()
 		}
 		wasUp = up
 	}

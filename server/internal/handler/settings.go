@@ -308,7 +308,9 @@ func systemSettingEffect(key string) string {
 	case strings.HasPrefix(key, "upload.rateLimit"):
 		return "上传限流设置已更新，立即生效"
 	case strings.HasPrefix(key, "upload.concurrency"):
-		return "上传并发度已更新，服务重启后生效"
+		// 并发度会立即调整 worker 池（UploadService.RefreshConcurrency），
+		// 不需要重启 —— 但**补丁缺失时会强制降级为 1**（见 UploadService.concurrency）
+		return "上传并发度已更新，立即生效（内核补丁缺失时会自动降为单并发）"
 	case strings.HasPrefix(key, "log."):
 		return "日志保留策略已更新，下次清理任务生效"
 	case key == "theme.active":

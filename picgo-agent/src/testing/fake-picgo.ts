@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from 'node:events'
-import type { IPicGo } from 'picgo'
+import type { IPicGo } from '@yeqingky/picgo-core'
 
 export interface FakeUploadBehavior {
   /** 返回的 IImgInfo[]（默认返回一张成功的图）。 */

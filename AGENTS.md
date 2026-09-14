@@ -240,28 +240,57 @@ uploadPath := filepath.Join(cfg.UploadsDir(), name)  // "./data/uploads/x.png"
 
 ## 7. 开发与验证命令
 
-```bash
-make help              # 查看全部目标
-make deps              # 安装三端依赖（含 PicGo-Core 的 install + build）
-make dev               # 启动 server + agent + web
+> ⚠️ **本项目只提供 docker compose**（D76）。开发也不例外 ——
+> 宿主**不需要**装 Go / Node / pnpm，全部在容器里。
+> 不要建议「宿主直跑 `go run`」「`pnpm dev`」「`make build`」这类方式（相关目标已移除）。
 
-# ---- 单元测试与检查 ----
-make check             # 串行跑三端全部门禁
+```bash
+make help              # 查看全部命令
+
+# ---- 开发环境（三容器 + 热重载）----
+make dev               # 起（前台，Ctrl-C 停止）
+make dev-up            # 起（后台）→ web:5173 / server:8080 / agent:36678
+make dev-down          # 停（保留数据）
+make dev-reset         # 停并删除数据（需确认；不可恢复）
+make dev-logs-server   # 看后端日志（**管理员初始密码在这里**）
+make dev-shell-server  # 进后端容器（跑 go test / make 等）
+make dev-build         # 改了依赖后重建镜像
+
+# ---- 门禁（都在容器内跑）----
+make check             # 三端：server + agent + web
 make check-server      # go vet ./... && go test ./... && CGO_ENABLED=0 go build
-make check-core        # PicGo-Core: pnpm lint && pnpm test
-make fmt               # gofmt -s -w
+make check-agent       # pnpm lint && pnpm typecheck && pnpm test
+make check-web         # pnpm lint && pnpm typecheck && pnpm build
 
-# ---- 构建 ----
-make build             # 三端产物
-make theme             # 构建默认主题 → themes/default/
-make pack              # 发布包
+# ---- 端到端 ----
+make e2e               # 全部（鉴权 + 主题 + Lsky）
+make e2e-auth          # 鉴权与用户
+make e2e-theme         # 主题系统（73 项）
+make e2e-lsky          # Lsky 兼容层（20 项，含信封一致性）
+
+# ---- 生产 ----
+make up / up-pgsql / up-build / down / logs
 ```
 
-**改完代码必须跑**：
+**数据目录**：开发用 `./data-dev/`（生产 `./data/`），两者隔离。
+`node_modules` 与 Go 模块缓存在**具名卷**里（容器内装、容器内用，
+避免宿主 Linux/WSL 与容器 Alpine 的平台差异）。
+
+**改完代码必须跑**（通过容器，不要用宿主 Go）：
 
 ```bash
-cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo-web
+make check-server
 ```
+
+### picgo-core 的来源
+
+侧车依赖 **`@yeqingky/picgo-core`**（npm 包，PicGo-Core 的 `PicGo-Web` fork）：
+
+- **不再需要**本地 `PicGo-Core` 源码、**不再需要** `make vendor` 打 tarball
+- 升级：改 `picgo-agent/package.json` 的版本 → `make dev-build`
+- 生产镜像构建时**会断言补丁存在**（dist 里必须出现 `contextData`），
+  缺失即构建失败 —— 防「装了无补丁版本、上传静默用错图床」这类极难排查的问题
+- `picgo-agent/src/**` 里的 import 一律写 `from '@yeqingky/picgo-core'`（**不是** `from 'picgo'`）
 
 ### 已实现的测试（W2）
 
@@ -319,13 +348,30 @@ DELETE /api/v1/albums/{id}   删相册（**图片仅脱离，不删图**）
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `Github-me:YeqingKy/PicGo-Core`，本地 `../PicGo-Core` |
-| 分支 | **`PicGo-Web`**（基线 `dev` @ v3.0.2，提交 `6419c2f`） |
-| 策略 | **自维护，不提交上游**；改动**只增不改**（D48–D51） |
+| **消费方式** | **npm 包 `@yeqingky/picgo-core`**（当前 `^1.0.0`，由 `picgo-agent/package.json` 声明） |
+| 源码仓库 | `Github-me:YeqingKy/PicGo-Core`，分支 **`PicGo-Web`**（基线 `dev` @ v3.0.2） |
+| 发布策略 | fork 的**版本线独立**，从 `1.0.0` 起（不与上游 v3.x 同步号），见其 `FORK-NOTES.md` §5 |
+| 上游策略 | **自维护，不提交上游**；改动**只增不改**，只在显式传参时生效（D48–D51） |
 | 补丁 | `UploadOptions.uploader`（按次指定图床）、`contextData`（事件归属）、per-context 配置覆盖、`Lifecycle.step` 改局部变量 |
-| 注意 | `dist/` 被 gitignore **且无 `prepare: build`** → **git 依赖不可用**，必须 `file:` 依赖或 tarball |
 
-详见 `../PicGo-Core/FORK-NOTES.md` 与 `docs/PICGO-INTEGRATION.md`。
+**本项目不再需要本地 PicGo-Core 源码**：
+
+- ❌ 不用 `file:../../PicGo-Core`（本地路径）
+- ❌ 不用 `make vendor` 打 tarball
+- ✅ 直接 `pnpm install` 从 npm 拉 —— 镜像构建与本地开发都一样
+- ✅ 镜像构建期**断言补丁存在**（dist 里必须含 `contextData`），缺失即构建失败
+
+**import 写法**（改了会编译失败或装错包）：
+
+```ts
+import { PicGo, evaluatePluginConfig } from '@yeqingky/picgo-core'   // ✅
+import type { IPicGo, IImgInfo } from '@yeqingky/picgo-core'         // ✅
+import { PicGo } from 'picgo'                                        // ❌ 旧写法
+```
+
+升级流程：改版本号 → 重新发 fork → `make dev-build` / `docker compose up -d --build`。
+
+详见 `docs/PICGO-INTEGRATION.md` §8 与 PicGo-Core 仓库的 `FORK-NOTES.md`。
 
 ---
 
@@ -338,6 +384,8 @@ DELETE /api/v1/albums/{id}   删相册（**图片仅脱离，不删图**）
 - [ ] 新增日志类型后：**同步 `model.LogTypes()`** 与 `docs/OPERATIONS.md`
 - [ ] 改动涉及设计/架构决策时：**在 `docs/DECISIONS.md` 追加新编号**，不要改历史条目
 - [ ] 改了 Lsky 层后跑 `make e2e-lsky`（信封一致性极易被改坏）
+- [ ] 改了主题分发/zip 安装后跑 `make e2e-theme`
+- [ ] **不要**新增宿主直跑方式（部署只走 docker compose，D76）
 - [ ] **本文件（AGENTS.md）已同步更新**
 
 ---

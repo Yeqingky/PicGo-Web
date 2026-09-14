@@ -5,7 +5,7 @@
 > 表名/列名以 [`DATA-MODEL.md`](./DATA-MODEL.md) 为准（**PascalCase**）；
 > agent 的 HTTP 契约见 [`API.md`](./API.md) §13。
 >
-> **本文所有结论均来自实测**：`picgo-core` v3.0.2（本地 `PicGo-Core`，分支 `PicGo-Web`，
+> **本文所有结论均来自实测**：`picgo-core` v3.0.2（fork `@yeqingky/picgo-core`，分支 `PicGo-Web`，
 > 基线上游 `dev`）与真实插件源码（`picgo-plugin-github-plus@1.2.3`、`picgo-plugin-lankong@1.1.3` 等）。
 > 引用处标注了具体文件与行号，便于复核。
 >
@@ -810,10 +810,12 @@ const supports = picgo.listenerCount('remove') > 0   // 粗粒度：至少有一
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `Github-me:YeqingKy/PicGo-Core` |
-| 本地路径 | `PicGo/PicGo-Core`（与 `PicGo-Web` 同级） |
+| **消费方式** | **npm 包 `@yeqingky/picgo-core`**（当前 `^1.0.0`）—— 本项目直接从 npm 安装，不需要本地源码 |
+| 仓库 | `Github-me:YeqingKy/PicGo-Core`（仅开发 fork 时需要） |
+| 本地路径（可选） | `PicGo/PicGo-Core`（与 `PicGo-Web` 同级；仅用于改 fork 本身） |
 | 分支 | **`PicGo-Web`** |
 | 基线 | 上游 `dev` @ **v3.0.2**（`f710083`） |
+| fork 版本线 | **独立，从 `1.0.0` 起**（不与上游 v3.x 同步号） |
 | 补丁提交 | **`6419c2f`** —— `feat(upload): per-upload uploader target + per-context config overrides` |
 | 改动规模 | **6 个文件，+687 / −16** |
 | 上游 | `https://github.com/PicGo/PicGo-Core`，`dev` |
@@ -1083,15 +1085,42 @@ picgo.once('failed',   (err) => resolve({ kind: 'failed',   jobUid: currentJobUi
 
 ### 8.6 依赖方式与构建
 
-| 阶段 | 方式 |
-|---|---|
-| **开发期** | `picgo-agent/package.json` 写 `"picgo": "file:../../PicGo-Core"`；Makefile 保证先 `cd PicGo-Core && pnpm install && pnpm build` |
-| **构建/部署** | `cd PicGo-Core && pnpm build && pnpm pack` 产出 tarball，Docker 内用 `file:./vendor/picgo-3.0.2-custom.tgz` |
+**唯一方式：npm 包。**
 
-> ⚠️ **git 依赖（`github:...#PicGo-Web`）不可用**：实测 `PicGo-Core` 的
-> `dist/` 在 `.gitignore` 中，且 `package.json` 的 `prepare` 是 `husky`（不是 `build`），
-> 所以从 git 安装拿到的是**没有构建产物的仓库**，`require('picgo')` 会失败。
-> **必须用 `file:` 或 tarball。**
+```jsonc
+// picgo-agent/package.json
+"dependencies": {
+  "@yeqingky/picgo-core": "^1.0.0"
+}
+```
+
+```ts
+// picgo-agent/src/picgo/instance.ts
+import { PicGo } from '@yeqingky/picgo-core'   // ✅
+```
+
+**已废弃的两种方式**（历史记录，不要再使用）：
+
+| 方式 | 为什么废弃 |
+|---|---|
+| `"picgo": "file:../../PicGo-Core"` | 需要本地 fork 源码 + 先 `pnpm build`（`dist/` 被 gitignore、无 `prepare:build`）——多一步且易忘 |
+| `make vendor` 打 tarball 供 Docker 用 | 同上，且引入了 `deploy/vendor/` 这一额外产物 |
+
+**镜像构建期断言补丁存在**（防止装到无补丁的版本）：
+
+```dockerfile
+RUN node -e "\
+      const src=require('fs').readFileSync(require.resolve('@yeqingky/picgo-core'),'utf8'); \
+      if(!src.includes('contextData')) throw new Error('picgo-core 缺少补丁'); \
+    "
+```
+
+> 为什么值得专门断言：装到无补丁版本时，服务照样起得来、上传照样"成功"，
+> 只是**并发时静默写错图床** —— 这类问题在运行时极难定位。
+
+> **fork 侧的 `pnpm-workspace.yaml`**（发布包时携带）：pnpm 12 默认拦截依赖的构建脚本，
+> 不显式允许 `esbuild` 时 `pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS` 失败
+> （`esbuild` 经 `vite`/`vitest` 传递依赖引入）。内容：
 
 > **`pnpm-workspace.yaml`（补丁新增）**：pnpm 12 默认拦截依赖的构建脚本，
 > 不显式允许 `esbuild` 时 `pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS` 失败

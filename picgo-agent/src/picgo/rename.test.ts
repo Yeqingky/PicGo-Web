@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { IImgInfo, IPicGo } from 'picgo'
+import type { IImgInfo, IPicGo } from '@yeqingky/picgo-core'
 import { createLogger } from '../logger.js'
 import { applyMagicPath, MAGIC_PATH_HOOK, readMagicPathContext, registerMagicPathHook } from './rename.js'
 

@@ -2,7 +2,7 @@
   "name": "picgo-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "PicGo-Web \u4fa7\u8f66\uff1a\u6301\u6709 picgo-core \u5b9e\u4f8b\uff0c\u5bf9\u5916\u63d0\u4f9b\u4ec5\u5185\u7f51\u53ef\u8bbf\u95ee\u7684 HTTP \u5951\u7ea6\uff08docs/API.md \u00a713\uff09",
+  "description": "PicGo-Web 侧车：持有 picgo-core 实例，对外提供仅内网可访问的 HTTP 契约（docs/API.md §13）",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -16,9 +16,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@yeqingky/picgo-core": "^1.0.0",
     "@hono/node-server": "^1.19.7",
-    "hono": "^4.11.3",
-    "picgo": "file:../../PicGo-Core"
+    "hono": "^4.11.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

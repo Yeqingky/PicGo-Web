@@ -6,7 +6,7 @@
  * 驱动字段名 / `IImgInfo`）保持原样，见下方 `RawPicgo` 系列类型。
  */
 
-import type { IImgInfo, IPluginConfig, IUploaderConfigItem } from 'picgo'
+import type { IImgInfo, IPluginConfig, IUploaderConfigItem } from '@yeqingky/picgo-core'
 
 // ---------------------------------------------------------------------------
 // 响应信封
@@ -58,6 +58,22 @@ export interface HealthzData {
   Uptime: number
   PID: number
   PluginsLoaded: number
+  /**
+   * picgo-core 的补丁探测结果（见 picgo/patch.ts）。
+   *
+   * Go 侧据此决定是否允许 `upload.concurrency > 1`：
+   * 补丁缺失时并发会**静默传错图床**，因此必须强制降级为 1。
+   */
+  Patches: PatchStatus
+}
+
+/** picgo-core 补丁探测结果（与 picgo/patch.ts 的 PatchStatus 一致）。 */
+export interface PatchStatus {
+  UploaderTarget: boolean
+  ContextData: boolean
+  PackageName: string
+  PackageVersion: string
+  Error?: string
 }
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { PicGo } from 'picgo'
-import type { IPicGo } from 'picgo'
+import { PicGo } from '@yeqingky/picgo-core'
+import type { IPicGo } from '@yeqingky/picgo-core'
 import type { AgentEnv } from '../env.js'
 import type { Logger } from '../logger.js'
 

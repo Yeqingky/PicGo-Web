@@ -46,6 +46,60 @@ type HealthzData struct {
 	Uptime        int64  `json:"Uptime"`
 	PID           int    `json:"PID"`
 	PluginsLoaded int    `json:"PluginsLoaded"`
+	// Patches 是 picgo-core 的补丁探测结果（见 picgo-agent/src/picgo/patch.ts）。
+	//
+	// 缺失时并发上传会**静默传错图床**（`picBed.uploader` 被互相覆盖），
+	// 因此 `UploadService` 会据此把并发度强制降到 1。
+	Patches PatchStatus `json:"Patches"`
+}
+
+// PatchStatus 是 picgo-core 补丁探测结果（与 agent 侧字段一一对应）。
+type PatchStatus struct {
+	// UploaderTarget 是否支持 `UploadOptions.uploader`（按次指定图床）。
+	UploaderTarget bool `json:"UploaderTarget"`
+	// ContextData 是否支持 `UploadOptions.contextData`（事件归属）。
+	ContextData bool `json:"ContextData"`
+	// PackageName / PackageVersion 便于排查「装错包」（如上游原版 picgo）。
+	PackageName    string `json:"PackageName"`
+	PackageVersion string `json:"PackageVersion"`
+	// Error 探测失败或缺补丁时的原因。
+	Error string `json:"Error"`
+}
+
+// Complete 是否全部补丁就位（Go 侧据此决定是否允许并发 > 1）。
+func (p PatchStatus) Complete() bool { return p.UploaderTarget && p.ContextData }
+
+// Describe 返回人类可读的缺失说明（用于日志与系统通知）。
+func (p PatchStatus) Describe() string {
+	if p.Complete() {
+		return ""
+	}
+	var missing []string
+	if !p.UploaderTarget {
+		missing = append(missing, "UploadOptions.uploader")
+	}
+	if !p.ContextData {
+		missing = append(missing, "UploadOptions.contextData")
+	}
+	desc := "picgo-core 缺少补丁：" + joinComma(missing)
+	if p.PackageName != "" {
+		desc += "（当前包：" + p.PackageName + "@" + p.PackageVersion + "）"
+	}
+	if p.Error != "" {
+		desc += "；" + p.Error
+	}
+	return desc
+}
+
+func joinComma(items []string) string {
+	out := ""
+	for i, s := range items {
+		if i > 0 {
+			out += ", "
+		}
+		out += s
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

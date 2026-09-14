@@ -10,7 +10,7 @@
  * - `GuiOnly` —— 插件含 `guiMenu` / `commands`（Electron 专属，Web 端不可用）
  */
 
-import type { IPicGo, IPluginConfig } from 'picgo'
+import type { IPicGo, IPluginConfig } from '@yeqingky/picgo-core'
 import type { Capabilities } from '../types.js'
 
 /**

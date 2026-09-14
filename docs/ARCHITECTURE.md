@@ -195,7 +195,7 @@ PicGo-Web/
 │       └── entrypoint.sh
 │
 ├── themes/
-│   └── default/                  # ★ 默认首页主题的打包产物（由 `make theme` 生成）
+│   └── default/                  # ★ 默认首页主题的源（二进制用 go:embed 内嵌同一份作兜底）
 │       ├── manifest.json         #   元数据 + 配置 schema + Pages（D94.2 / D98）
 │       ├── index.html
 │       ├── assets/               # 构建时 base 必须为 /theme-assets/（§9.4）
@@ -1138,7 +1138,7 @@ agent 侧实现三件事：
 | 项 | 规则 |
 |---|---|
 | 内嵌内容 | 默认主题的**压缩归档**（`server/internal/theme/embedded/`，`go:embed`） |
-| 生成方式 | `make theme` 构建默认主题 → 打包 `themes/default/` → 同时产出压缩归档拷入 Go 包目录 |
+| 生成方式 | 源在 `server/internal/theme/embedded/`；`go:embed` 打进二进制作兜底，无需额外构建步骤 |
 | **兜底条件** | 以下任一情况**直接服务内嵌默认主题**（其 `Pages = ["/"]`）：<br>① `theme.active` 指向的主题目录不存在；② `manifest.json` 缺失或非法；③ `index.html` 缺失；④ `Pages` 校验失败 |
 | 资产兜底 | 主题**有效**时，主题的某个资源缺失 → **404**（便于排查，**不**给它喂内嵌默认主题的同名文件，否则会静默错配代码）；**只有整个主题无效时**才整体回退 |
 | 为什么必须内嵌 | 磁盘上的主题目录可能被误删、被半途替换、或用户装了个坏主题。没有内嵌兜底，一次误操作就会让**首页白屏**，而首页正是用户最先看到的东西 |

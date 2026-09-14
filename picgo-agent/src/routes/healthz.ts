@@ -14,6 +14,7 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context.js'
 import { uptimeSeconds } from '../context.js'
+import { patchStatus } from '../picgo/patch.js'
 import type { HealthzData } from '../types.js'
 
 export function healthzRoutes(ctx: AppContext): Hono {
@@ -33,7 +34,9 @@ export function healthzRoutes(ctx: AppContext): Hono {
       ConfigPath: ctx.env.ConfigPath,
       Uptime: uptimeSeconds(ctx),
       PID: process.pid,
-      PluginsLoaded: pluginsLoaded
+      PluginsLoaded: pluginsLoaded,
+      // 补丁状态：Go 侧据此决定并发度上限（见 picgo/patch.ts 的说明）
+      Patches: patchStatus()
     }
 
     return c.json(data)

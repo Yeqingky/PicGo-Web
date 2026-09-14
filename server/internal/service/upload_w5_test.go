@@ -689,3 +689,89 @@ func keysOfAny(m map[string]any) []string {
 	sortStrings(out)
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// 并发安全闸门：补丁缺失时强制单并发
+// ---------------------------------------------------------------------------
+
+// TestConcurrencyForcedToOneWithoutPatch 校验「picgo-core 补丁缺失 → 并发强制为 1」。
+//
+// 背景：`UploadOptions.uploader` 是本项目给 PicGo-Core 打的补丁。
+// 若依赖被换成上游原版，并发时两个批次会互相覆盖 `picBed.uploader`，
+// **静默把图传到错误的图床**（不报错、链接可用，只是落错地方）。
+// 因此补丁缺失必须降级 —— 宁可慢，也不能传错。
+func TestConcurrencyForcedToOneWithoutPatch(t *testing.T) {
+	env := newW5Env(t)
+	env.startQueue()
+
+	// 配置并发 4
+	if err := env.settings.Set("upload.concurrency", 4, ""); err != nil {
+		t.Fatalf("设置并发失败: %v", err)
+	}
+
+	// 模拟「补丁缺失」
+	env.upload.SetPatchChecker(func() bool { return false })
+	env.upload.RefreshConcurrency()
+
+	if got := env.upload.poolSize; got != 1 {
+		t.Errorf("补丁缺失时应强制单并发，实际 %d", got)
+	}
+
+	// 模拟「补丁齐备」→ 应升回配置值
+	env.upload.SetPatchChecker(func() bool { return true })
+	env.upload.RefreshConcurrency()
+
+	if got := env.upload.poolSize; got != 4 {
+		t.Errorf("补丁齐备时应升到配置值 4，实际 %d", got)
+	}
+}
+
+// TestConcurrencyUnchangedWhenCheckerNil 校验未注入探测时不干预（测试/MOCK 模式）。
+func TestConcurrencyUnchangedWhenCheckerNil(t *testing.T) {
+	env := newW5Env(t)
+	env.startQueue()
+
+	if err := env.settings.Set("upload.concurrency", 3, ""); err != nil {
+		t.Fatalf("设置并发失败: %v", err)
+	}
+	// 未调用 SetPatchChecker（nil）→ 按配置值
+	env.upload.RefreshConcurrency()
+
+	if got := env.upload.poolSize; got != 3 {
+		t.Errorf("未注入探测时应按配置值 3，实际 %d", got)
+	}
+}
+
+// TestConcurrencyClamped 校验异常配置被夹紧。
+func TestConcurrencyClamped(t *testing.T) {
+	env := newW5Env(t)
+	env.startQueue()
+
+	cases := []struct {
+		configured int
+		want       int
+	}{
+		{0, 1},    // 下限
+		{-5, 1},   // 负数
+		{1, 1},    // 正常
+		{8, 8},    // 正常
+		{999, 64}, // 上限
+	}
+	for _, tc := range cases {
+		if err := env.settings.Set("upload.concurrency", tc.configured, ""); err != nil {
+			t.Fatalf("设置并发失败: %v", err)
+		}
+		env.upload.RefreshConcurrency()
+		if got := env.upload.poolSize; got != tc.want {
+			t.Errorf("配置 %d 时应为 %d，实际 %d", tc.configured, tc.want, got)
+		}
+	}
+}
+
+// TestRefreshConcurrencyBeforeStartIsNoop 校验未启动时调用不 panic。
+func TestRefreshConcurrencyBeforeStartIsNoop(t *testing.T) {
+	env := newW5Env(t)
+	// 不调用 startQueue
+	env.upload.SetPatchChecker(func() bool { return true })
+	env.upload.RefreshConcurrency() // 不应 panic
+}

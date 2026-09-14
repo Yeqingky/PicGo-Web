@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { IPicGo } from 'picgo'
+import type { IPicGo } from '@yeqingky/picgo-core'
 import { createLogger } from '../logger.js'
 import { CapabilityCache } from './capability.js'
 import { createGuiApiShim, inferFromNotices, performRemove } from './remove.js'

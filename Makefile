@@ -1,213 +1,156 @@
-# PicGo-Web 根 Makefile
+# PicGo-Web 统一入口
 #
-# 目标命名与 README.md、「docs/PLAN.md」保持一致。
-# 三端：server（Go）/ picgo-agent（Node 侧车）/ web（React 前端）
+# ⚠️ 本项目**只提供 docker compose 部署**（D76）。
+#    开发同样走 compose（docker-compose-dev.yml），不再提供宿主直跑的方式。
+#
+#   make dev          起开发环境（前端/后端/侧车三容器 + 热重载）
+#   make up           起生产环境（SQLite）
+#   make help         看全部命令
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-# ---- 路径与变量 ----
-ROOT        := $(CURDIR)
-SERVER_DIR  := $(ROOT)/server
-AGENT_DIR   := $(ROOT)/picgo-agent
-WEB_DIR     := $(ROOT)/web
-THEME_DIR   := $(ROOT)/themes
-CORE_DIR    := $(ROOT)/../PicGo-Core
+ROOT      := $(CURDIR)
+COMPOSE   := docker compose
+DEV_FILE  := docker-compose-dev.yml
+PROD_FILE := docker-compose.yml
+PG_FILE   := docker-compose.pgsql.yml
 
-# 统一 Go 环境（纯 Go、免 CGO）
-export CGO_ENABLED := 0
-export GOFLAGS     := -mod=mod
-
-BIN := $(SERVER_DIR)/picgo-web
+# 开发环境用独立的数据目录，与生产的 ./data 隔离
+DATA_DEV  := $(ROOT)/data-dev
 
 .PHONY: help
 help: ## 显示本帮助
-	@echo "PicGo-Web 可用目标："
+	@echo "PicGo-Web 可用命令（全部基于 docker compose）："
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 # ===========================================================================
-# 依赖安装
-# ===========================================================================
-
-.PHONY: deps
-deps: deps-core deps-agent deps-web ## 安装全部依赖（含 PicGo-Core）
-
-.PHONY: deps-core
-deps-core: ## 准备本地 PicGo-Core（分支 PicGo-Web 并构建 dist/）
-	@if [ ! -d "$(CORE_DIR)" ]; then \
-		echo "✗ 未找到 PicGo-Core：期望位于 $(CORE_DIR)"; \
-		echo "  请先 clone 并切到 PicGo-Web 分支："; \
-		echo "    git clone Github-me:YeqingKy/PicGo-Core $(CORE_DIR)"; \
-		echo "    cd $(CORE_DIR) && git checkout PicGo-Web"; \
-		exit 1; \
-	fi
-	@echo "→ 安装并构建 PicGo-Core（dist/ 被 gitignore，必须构建）"
-	@cd "$(CORE_DIR)" && pnpm install && pnpm build
-
-.PHONY: deps-server
-deps-server: ## 拉取 Go 依赖
-	@cd $(SERVER_DIR) && go mod download
-
-.PHONY: deps-agent
-deps-agent: ## 安装 picgo-agent 依赖
-	@cd $(AGENT_DIR) && pnpm install
-
-.PHONY: deps-web
-deps-web: ## 安装前端依赖
-	@cd $(WEB_DIR) && pnpm install
-
-# ===========================================================================
-# 开发
+# 开发（docker compose）
 # ===========================================================================
 
 .PHONY: dev
-dev: ## 启动全部开发进程（Go 会在自己内部拉起 agent，另起 Vite）
-	@echo "→ 启动 server（内含 agent 子进程）+ web（Ctrl-C 全部退出）"
-	@echo "  · Go 后端 :8080  · agent 子进程 127.0.0.1:36678  · 前端 5173"
-	@echo "  ⚠️  不要把 agent 与 dev 同时跑：端口会冲突（单独调试 agent 用 make dev-no-agent）"
-	@$(MAKE) -j2 server web
+dev: ## 起开发环境（三容器 + 热重载；前台，Ctrl-C 停止）
+	@mkdir -p $(DATA_DEV)/picgo
+	@echo "→ 启动开发环境（前端 :5173 / 后端 :8080 / 侧车 :36678）"
+	@echo "  首次启动会自动构建镜像，约 1~2 分钟"
+	@echo "  管理员初始密码：docker compose -f $(DEV_FILE) logs server | grep password"
+	@$(COMPOSE) -f $(DEV_FILE) up
 
-.PHONY: dev-no-agent
-dev-no-agent: ## 三进程分开调试（agent 不由 Go 拉起）
-	@echo "→ 同时启动 server / agent / web（agent 走 tsx watch，带热重载）"
-	@$(MAKE) -j3 server-no-agent agent web
+.PHONY: dev-build
+dev-build: ## 重建开发镜像（改了依赖后需要）
+	@mkdir -p $(DATA_DEV)/picgo
+	@$(COMPOSE) -f $(DEV_FILE) build
 
-.PHONY: server
-server: ## 启动 Go 后端（默认 :8080；会自动拉起 agent 子进程）
-	@cd $(SERVER_DIR) && go run ./cmd/picgo-web
+.PHONY: dev-up
+dev-up: ## 起开发环境（后台）
+	@mkdir -p $(DATA_DEV)/picgo
+	@$(COMPOSE) -f $(DEV_FILE) up -d
+	@echo "✓ 前端 http://localhost:5173  后端 http://localhost:8080"
 
-.PHONY: server-no-agent
-server-no-agent: ## 启动 Go 后端，但不拉起 agent（配合 make agent 使用）
-	@cd $(SERVER_DIR) && PICGO_WEB_AGENT_AUTOSTART=false go run ./cmd/picgo-web
+.PHONY: dev-down
+dev-down: ## 停开发环境（保留数据）
+	@$(COMPOSE) -f $(DEV_FILE) down
 
-.PHONY: agent
-agent: ## 只启动 picgo-agent 侧车（tsx watch 热重载；需与 Go 共享同一令牌）
-	@cd $(AGENT_DIR) && PICGO_AGENT_TOKEN="$${PICGO_WEB_AGENT_TOKEN:-$$(cat $(SERVER_DIR)/../data/agent-token.txt 2>/dev/null || true)}" pnpm dev
+.PHONY: dev-reset
+dev-reset: ## 停开发环境并**删除数据**（data-dev 与容器卷；不可恢复）
+	@echo "⚠️  将删除 $(DATA_DEV) 与 compose 卷（数据库/主题/插件全部丢失）"
+	@read -p "确认？输入 yes 继续：" ans; [ "$$ans" = "yes" ] || { echo "已取消"; exit 1; }
+	@$(COMPOSE) -f $(DEV_FILE) down -v
+	@rm -rf $(DATA_DEV)
+	@echo "✓ 已重置"
 
-.PHONY: web
-web: ## 只启动前端 Vite dev server（/api 代理到 :8080）
-	@cd $(WEB_DIR) && pnpm dev
+.PHONY: dev-logs
+dev-logs: ## 跟踪开发环境全部日志
+	@$(COMPOSE) -f $(DEV_FILE) logs -f --tail=100
 
-# ===========================================================================
-# 构建
-# ===========================================================================
+.PHONY: dev-logs-server
+dev-logs-server: ## 只看后端日志（含管理员初始密码）
+	@$(COMPOSE) -f $(DEV_FILE) logs -f --tail=100 server
 
-.PHONY: build
-build: build-web build-agent build-server ## 构建全部产物
+.PHONY: dev-shell-server
+dev-shell-server: ## 进入后端容器
+	@$(COMPOSE) -f $(DEV_FILE) exec server sh
 
-.PHONY: build-server
-build-server: ## 编译 Go 静态二进制（CGO_ENABLED=0）
-	@echo "→ 构建 Go 二进制"
-	@cd $(SERVER_DIR) && go build -trimpath -ldflags "-s -w" -o picgo-web ./cmd/picgo-web
-	@echo "✓ $(BIN)"
+.PHONY: dev-shell-agent
+dev-shell-agent: ## 进入侧车容器
+	@$(COMPOSE) -f $(DEV_FILE) exec agent sh
 
-.PHONY: build-web
-build-web: ## 构建前端 SPA（并同步到 internal/webfs/dist 供 go:embed）
-	@cd $(WEB_DIR) && pnpm build
-	@echo "→ 同步前端产物到 server/internal/webfs/dist（go:embed 是编译期行为，必须先同步再编译）"
-	@rm -rf $(SERVER_DIR)/internal/webfs/dist/assets
-	@find $(SERVER_DIR)/internal/webfs/dist -maxdepth 1 -type f ! -name '.gitkeep' -delete
-	@cp -r $(WEB_DIR)/dist/. $(SERVER_DIR)/internal/webfs/dist/
-	@echo "✓ $(SERVER_DIR)/internal/webfs/dist"
-
-.PHONY: build-agent
-build-agent: ## 构建 picgo-agent 产物
-	@cd $(AGENT_DIR) && pnpm build
-
-.PHONY: theme
-theme: ## 导出默认主题到 themes/default/（源：server/internal/theme/embedded）
-	@echo "→ 导出默认主题"
-	@mkdir -p $(THEME_DIR)/default
-	@cp -r $(SERVER_DIR)/internal/theme/embedded/. $(THEME_DIR)/default/
-	@echo "✓ $(THEME_DIR)/default/（可直接放进 <dataDir>/themes/ 使用）"
-	@echo "  提示：二进制已内嵌同一份，作为主题缺失时的兜底（D94），无需手动部署。"
-
-.PHONY: vendor
-vendor: ## 把打过补丁的 PicGo-Core 打成 tarball 到 deploy/vendor/（Docker 构建需要）
-	@echo "→ 打包 PicGo-Core tarball"
-	@mkdir -p $(ROOT)/deploy/vendor
-	@rm -f $(ROOT)/deploy/vendor/picgo-*.tgz
-	@cd "$(CORE_DIR)" && pnpm build && pnpm pack --pack-destination $(ROOT)/deploy/vendor
-	@ls -lh $(ROOT)/deploy/vendor/
-
-.PHONY: pack
-pack: build theme vendor ## 产出可发布包（二进制 + 主题 + PicGo-Core tarball）
-	@echo "✓ 发布包已就绪"
+.PHONY: dev-ps
+dev-ps: ## 查看开发环境容器状态
+	@$(COMPOSE) -f $(DEV_FILE) ps
 
 # ===========================================================================
-# 质量门禁
+# 生产（docker compose）
+# ===========================================================================
+
+.PHONY: up
+up: ## 起生产环境（SQLite；后台）
+	@[ -f .env ] || { echo "✗ 缺少 .env（cp .env.example .env 后按需修改）"; exit 1; }
+	@$(COMPOSE) -f $(PROD_FILE) up -d
+	@echo "✓ 打开 http://localhost:8080"
+
+.PHONY: up-pgsql
+up-pgsql: ## 起生产环境（PostgreSQL 覆盖）
+	@[ -f .env ] || { echo "✗ 缺少 .env"; exit 1; }
+	@$(COMPOSE) -f $(PROD_FILE) -f $(PG_FILE) up -d
+
+.PHONY: up-build
+up-build: ## 从源码构建镜像并起生产环境
+	@[ -f .env ] || { echo "✗ 缺少 .env"; exit 1; }
+	@$(COMPOSE) -f $(PROD_FILE) up -d --build
+
+.PHONY: down
+down: ## 停生产环境（保留数据）
+	@$(COMPOSE) -f $(PROD_FILE) down
+
+.PHONY: logs
+logs: ## 跟踪生产日志
+	@$(COMPOSE) -f $(PROD_FILE) logs -f --tail=100
+
+# ===========================================================================
+# 质量门禁（在容器里跑，保证与部署环境一致）
 # ===========================================================================
 
 .PHONY: check
-check: check-core check-server check-agent check-web ## 串行跑三端全部检查（含 PicGo-Core）
-
-.PHONY: check-core
-check-core: ## PicGo-Core：lint + 单测
-	@echo "=== PicGo-Core ==="
-	@cd "$(CORE_DIR)" && pnpm lint && pnpm test
+check: check-server check-agent check-web ## 三端全部检查
 
 .PHONY: check-server
 check-server: ## Go：vet + test + 静态编译
 	@echo "=== server ==="
-	@cd $(SERVER_DIR) && go vet ./... && go test ./... && CGO_ENABLED=0 go build -o /dev/null ./cmd/picgo-web
+	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps server sh -c \
+		'go vet ./... && go test ./... && CGO_ENABLED=0 go build -o /dev/null ./cmd/picgo-web'
 
 .PHONY: check-agent
-check-agent: ## agent：lint + typecheck + test
+check-agent: ## 侧车：lint + typecheck + test
 	@echo "=== picgo-agent ==="
-	@cd $(AGENT_DIR) && pnpm lint && pnpm typecheck && pnpm test
+	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps agent sh -c \
+		'pnpm lint && pnpm typecheck && pnpm test'
 
 .PHONY: check-web
 check-web: ## 前端：lint + typecheck + build
 	@echo "=== web ==="
-	@cd $(WEB_DIR) && pnpm lint && pnpm typecheck && pnpm build
-
-.PHONY: fmt
-fmt: ## 格式化 Go 代码
-	@cd $(SERVER_DIR) && gofmt -s -w .
+	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps web sh -c \
+		'pnpm lint && pnpm typecheck && pnpm build'
 
 # ===========================================================================
-# 端到端验证（会真实起服务 + 建临时数据目录，不污染 ./data）
+# 端到端验证（在 server 容器内跑，用临时数据目录，不污染 data-dev）
 # ===========================================================================
 
 .PHONY: e2e
-e2e: e2e-lsky ## 跑全部端到端验证
+e2e: e2e-auth e2e-theme e2e-lsky ## 跑全部端到端验证
 
-.PHONY: e2e-lsky
-e2e-lsky: ## 验证 Lsky v1 兼容层（9 端点 + 信封一致性，W9/D52）
-	@echo "=== Lsky v1 兼容层端到端 ==="
-	@$(ROOT)/scripts/e2e-lsky.sh
+.PHONY: e2e-auth
+e2e-auth: ## 验证鉴权与用户（登录/刷新/改密/API Token/限流/首启引导）
+	@echo "=== 鉴权与用户冒烟 ==="
+	@$(COMPOSE) -f $(DEV_FILE) --profile e2e run --rm --no-deps e2e ./scripts/smoke-auth.sh
 
 .PHONY: e2e-theme
-e2e-theme: ## 验证主题系统与静态托管（分发算法/兜底/zip 安装，W10/D94-D99）
+e2e-theme: ## 验证主题系统（分发算法/兜底/zip 九条校验）
 	@echo "=== 主题系统端到端 ==="
-	@$(ROOT)/scripts/e2e-theme.sh
+	@$(COMPOSE) -f $(DEV_FILE) --profile e2e run --rm --no-deps e2e ./scripts/e2e-theme.sh
 
-.PHONY: e2e-all
-e2e-all: e2e-theme e2e-lsky ## 串行跑两个端到端脚本
-
-# ===========================================================================
-# 部署
-# ===========================================================================
-
-.PHONY: docker-build
-docker-build: vendor ## 构建 Docker 镜像（先 vendor PicGo-Core tarball）
-	@docker build -f deploy/docker/Dockerfile -t picgo-web:latest .
-
-.PHONY: docker-up
-docker-up: ## 启动（SQLite）
-	@docker compose up -d
-
-.PHONY: docker-up-pgsql
-docker-up-pgsql: ## 启动（PostgreSQL 覆盖）
-	@docker compose -f docker-compose.yml -f docker-compose.pgsql.yml up -d
-
-.PHONY: docker-down
-docker-down: ## 停止
-	@docker compose down
-
-.PHONY: clean
-clean: ## 清理构建产物
-	@rm -f $(BIN)
-	@rm -rf $(THEME_DIR) $(WEB_DIR)/dist $(AGENT_DIR)/dist
-	@echo "✓ 已清理"
+.PHONY: e2e-lsky
+e2e-lsky: ## 验证 Lsky v1 兼容层（9 端点 + 信封一致性）
+	@echo "=== Lsky v1 兼容层端到端 ==="
+	@$(COMPOSE) -f $(DEV_FILE) --profile e2e run --rm --no-deps e2e ./scripts/e2e-lsky.sh

@@ -26,7 +26,7 @@
  */
 
 import fs from 'node:fs'
-import type { IImgInfo, IPicGo } from 'picgo'
+import type { IImgInfo, IPicGo } from '@yeqingky/picgo-core'
 import { describeError } from '../errors.js'
 import type { Logger } from '../logger.js'
 import type { UploadData, UploadRequest } from '../types.js'

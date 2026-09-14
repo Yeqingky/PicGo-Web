@@ -35,26 +35,27 @@ WORKDIR /build/agent
 
 RUN corepack enable
 
-# picgo-agent 的 package.json 里 picgo 依赖是 `file:../../PicGo-Core`（本地开发用路径）。
-# 镜像里没有那个目录，因此改用 `make vendor` 产出的 tarball。
-COPY deploy/vendor/ /vendor/
+# picgo-core 从 npm 取打过补丁的版本：`@yeqingky/picgo-core`（含按次指定图床等补丁，
+# 见 PicGo-Core 仓库的 FORK-NOTES.md）。因此镜像里**不需要**本地 PicGo-Core 源码，
+# 也不需要预先 `make vendor` 打 tarball。
 COPY picgo-agent/package.json picgo-agent/pnpm-lock.yaml ./
-RUN set -eux; \
-    PKG=$(ls /vendor/picgo-*.tgz | head -n1); \
-    echo "使用 vendored picgo: ${PKG}"; \
-    node -e "\
-      const fs=require('fs'); \
-      const p=JSON.parse(fs.readFileSync('package.json','utf8')); \
-      p.dependencies.picgo='file:'+process.argv[1]; \
-      fs.writeFileSync('package.json', JSON.stringify(p,null,2)); \
-    " "$PKG"; \
-    pnpm install --frozen-lockfile=false
+RUN pnpm install --frozen-lockfile
 
 COPY picgo-agent/ ./
 RUN pnpm build
 
 # 只保留生产依赖，缩小体积
 RUN pnpm prune --prod
+
+# 构建期断言：确认 picgo-core 真的装进来了，且**带我们的补丁**
+# （否则容器起得来但上传会静默用错图床 —— 这类问题在运行时极难排查）
+RUN node -e "\
+      const p=require('@yeqingky/picgo-core/package.json'); \
+      const fs=require('fs'); \
+      const src=fs.readFileSync(require.resolve('@yeqingky/picgo-core'),'utf8'); \
+      if(!src.includes('contextData')) throw new Error('picgo-core 缺少补丁（contextData）'); \
+      console.log('✓ picgo-core', p.version, '（补丁已就位）'); \
+    "
 
 
 # ===========================================================================
@@ -110,23 +111,20 @@ WORKDIR /app
 # Go 二进制
 COPY --from=server-builder /out/picgo-web /app/picgo-web
 
-# agent（含其 node_modules；picgo-core 已作为 file: tarball 装进 node_modules）
+# agent（含其 node_modules；picgo-core 从 npm 装进 node_modules）
 COPY --from=agent-builder /build/agent/dist /app/picgo-agent/dist
 COPY --from=agent-builder /build/agent/node_modules /app/picgo-agent/node_modules
 COPY --from=agent-builder /build/agent/package.json /app/picgo-agent/package.json
 
-# 内嵌默认主题的 seed 源（D94：主题缺失时的兜底已编进二进制，
-# 这份磁盘副本便于管理员直接查看/复制）
-COPY server/internal/theme/embedded /app/themes-seed/default
-
+# ENV 说明：
+#   PICGO_WEB_AGENT_URL   Go 的 supervisor 依据它推导 agent 的监听地址并注入子进程
+#   PICGO_WEB_AGENT_AUTOSTART  保持默认 true —— **由 Go 拉起并管理 agent 子进程**
+#     （令牌生成、健康探测、退避重启、优雅关停都在 Go 里，见 internal/agent/lifecycle.go）
 ENV PICGO_WEB_LISTEN=0.0.0.0:8080 \
     PICGO_WEB_DATA_DIR=/data \
     PICGO_WEB_DB_DRIVER=sqlite \
-    PICGO_WEB_AGENT_AUTOSTART=false \
+    PICGO_WEB_AGENT_AUTOSTART=true \
     PICGO_WEB_AGENT_URL=http://127.0.0.1:36678 \
-    PICGO_WEB_AGENT_CONFIG_PATH=/data/picgo/config.json \
-    PICGO_WEB_AGENT_PORT=36678 \
-    PICGO_WEB_AGENT_HOST=127.0.0.1 \
     TZ=Asia/Shanghai \
     GIN_MODE=release
 
@@ -134,13 +132,20 @@ VOLUME ["/data"]
 EXPOSE 8080
 
 # 健康检查：/healthz 不使用信封、字段小写，可直接解析
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 
-# 说明：agent 与 Go 同容器。默认 `PICGO_WEB_AGENT_AUTOSTART=false`，
-# 由 deploy/docker/entrypoint.sh 先拉起 agent 再启动 Go
-# （自动拉起的进程管理尚未实现，见 docs/PLAN.md「未完成」）。
-COPY deploy/docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-ENTRYPOINT ["/app/entrypoint.sh"]
+# 无入口脚本。
+#
+# 为什么不需要：所有初始化工作都在 Go 里完成，且都有测试覆盖 ——
+#   · 数据目录创建        cfg.EnsureDirs()
+#   · 主题 seed           启动时自动种入（internal/theme/store.go 的 Seed）
+#   · agent 令牌          解析/生成/落盘 0600（internal/agent/lifecycle.go）
+#   · 拉起 agent 子进程   由 supervisor 完成（含 /app/picgo-agent/dist/index.js 探测）
+#   · 健康探测 + 退避重启  同上
+#   · 优雅关停            收到 TERM 后先停队列再关 agent
+#
+# 曾经用 entrypoint.sh 做这些，但它必须手工把 Go 的 `PICGO_WEB_AGENT_*`
+# 映射成 agent 的 `PICGO_AGENT_*`（**两个前缀不同名**）—— 漏掉就会让 agent
+# 把配置写进镜像内部而不是数据卷，重启即丢且极难排查。交给 Go 后这类问题不存在。
+CMD ["/app/picgo-web"]

@@ -1,48 +1,58 @@
-# PicGo-Web 部署（默认 SQLite）
+# PicGo-Web 生产部署（默认 SQLite）
 #
-# 面向用户的**唯一官方**部署方式（docs/DECISIONS.md D76）。
+# ⚠️ 本项目**只提供 docker compose 部署**（D76）。
+#    开发环境见 `docker-compose-dev.yml`（`make dev`）。
 #
-#   mkdir picgo-web && cd picgo-web
-#   curl -O https://raw.githubusercontent.com/YeqingKy/PicGo-Web/main/docker-compose.yml
-#   curl -o .env https://raw.githubusercontent.com/YeqingKy/PicGo-Web/main/.env.example
-#   # 编辑 .env（至少确认 PICGO_WEB_LISTEN 与 PICGO_WEB_DATA_DIR）
-#   docker compose up -d
+# 快速开始：
+#   cp .env.example .env      # 按需修改（至少确认监听地址与数据目录）
+#   docker compose up -d      # 首次会自动构建镜像（约 1~2 分钟）
+#   打开 http://localhost:8080
 #
-# 切 PostgreSQL：追加覆盖文件
+# 切 PostgreSQL：
 #   docker compose -f docker-compose.yml -f docker-compose.pgsql.yml up -d
+#
+# 管理员初始密码：容器日志里的 WARN 行，或 data/initial-admin-password.txt
 
 services:
   picgo-web:
+    # 同时给 image 与 build：
+    #   · 本地没有镜像时，`docker compose up -d` 会自动按 build 构建
+    #   · 已有官方镜像时可跳过构建（`docker compose pull` 后 up）
+    #   · `docker compose up -d --build` 强制重新构建
     image: ghcr.io/yeqingky/picgo-web:latest
-    # 从源码构建时启用（需要仓库根目录存在 Dockerfile，见 W9）
-    # build:
-    #   context: .
-    #   dockerfile: deploy/docker/Dockerfile
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+
     container_name: picgo-web
     restart: unless-stopped
 
-    # 注意：这里**只放启动引导类变量**。
-    # 其余业务配置一律在后台界面改（存数据库）。
-    # 数据库连接等按需从 .env 注入；不要把业务配置写进 environment，
-    # 否则会覆盖数据库里的值（环境变量优先级更高，见 D18 三级分层）。
+    # ⚠️ 这里**只放启动引导类变量**（见 docs/DECISIONS.md D18 三级分层）。
+    #    业务配置（站点信息、上传限制、SMTP、OAuth、限流、日志保留…）
+    #    一律在**后台界面**里改 —— 它们存在数据库里，改完立即生效、无需重启。
+    #    若在这里设置同名变量，会**覆盖**数据库里的值（环境变量优先级最高），
+    #    导致「后台改了没效果」这类困惑。
     environment:
       PICGO_WEB_LISTEN: "0.0.0.0:8080"
       PICGO_WEB_DATA_DIR: "/data"
       PICGO_WEB_DB_DRIVER: "sqlite"
       PICGO_WEB_LOG_LEVEL: "info"
+      # 侧车由 Go 拉起并管理（令牌生成、健康探测、退避重启、优雅关停）
+      PICGO_WEB_AGENT_AUTOSTART: "true"
+      PICGO_WEB_AGENT_URL: "http://127.0.0.1:36678"
       GIN_MODE: "release"
       TZ: "Asia/Shanghai"
 
-    # 敏感值与数据库配置从 .env 读取（不在这里明文写）
+    # 数据库连接、加密主密钥、agent 令牌等敏感项从 .env 读取
     env_file:
       - .env
 
     ports:
-      # 只绑回环时改为 "127.0.0.1:8080:8080"，由前置反向代理对外
+      # 只给本机反向代理时改为 "127.0.0.1:8080:8080"
       - "8080:8080"
 
     volumes:
-      # ⚠️ 这一切就是全部状态：数据库 + 主密钥 + 上传暂存 + picgo 配置 + 主题
+      # 这一切就是全部状态：数据库 + 主密钥 + 上传暂存 + picgo 配置 + 主题
       # 备份整个目录即完成备份（D82：本项目不提供导出/导入功能）
       - ./data:/data
 
@@ -51,11 +61,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
-
-    # agent 由 Go 在容器内拉起（PICGO_WEB_AGENT_AUTOSTART 默认 true），
-    # 因此不需要额外的 service。若拆分为两个容器，把该变量设为 false
-    # 并单独部署 picgo-agent，见 README「其他部署方式」。
+      # 首次启动要建库 + 迁移 + 拉起 Node 侧车，给足启动时间
+      start_period: 30s
 
     logging:
       driver: json-file

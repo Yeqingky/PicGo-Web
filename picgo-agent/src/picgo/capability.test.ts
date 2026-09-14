@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { IPluginConfig } from 'picgo'
+import type { IPluginConfig } from '@yeqingky/picgo-core'
 import {
   buildCapabilities,
   CapabilityCache,

@@ -11,12 +11,12 @@ importers:
       '@hono/node-server':
         specifier: ^1.19.7
         version: 1.19.17(hono@4.13.7)
+      '@yeqingky/picgo-core':
+        specifier: ^1.0.0
+        version: 1.0.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       hono:
         specifier: ^4.11.3
         version: 4.13.7
-      picgo:
-        specifier: file:../../PicGo-Core
-        version: file:../../PicGo-Core(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -553,6 +553,11 @@ packages:
 
   '@vitest/utils@3.2.7':
     resolution: {integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==}
+
+  '@yeqingky/picgo-core@1.0.0':
+    resolution: {integrity: sha512-YkL9BQErK35PLazqMEAD6gzBNr1N/f0zVVVWQbgyJCx9vgj6jPWA9ffFIybAlbPr4zTPvf19fqQAoRn3jPI5ww==}
+    engines: {node: '>= 20.19.0'}
+    hasBin: true
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -1284,11 +1289,6 @@ packages:
   pathval@2.0.1:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
-
-  picgo@file:../../PicGo-Core:
-    resolution: {directory: ../../PicGo-Core, type: directory}
-    engines: {node: '>= 20.19.0'}
-    hasBin: true
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -2039,6 +2039,40 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
+  '@yeqingky/picgo-core@1.0.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
+    dependencies:
+      '@hono/node-server': 1.19.17(hono@4.13.7)
+      '@picgo/i18n': 1.0.0
+      '@picgo/store': 2.2.2
+      axios: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      chalk: 2.4.2
+      commander: 8.3.0
+      comment-json: 4.6.2
+      cross-spawn: 6.0.6
+      dayjs: 1.11.23
+      dotenv: 17.4.2
+      ejs: 3.1.10
+      form-data: 4.0.6
+      fs-extra: 6.0.1
+      giget: 2.0.0
+      globby: 11.1.0
+      hono: 4.13.7
+      image-size-next: 2.1.1
+      inquirer: 6.5.2
+      is-wsl: 2.2.0
+      js-yaml: 4.3.2
+      lodash: 4.18.1
+      md5: 2.3.0
+      mime-types: 3.0.2
+      minimist: 1.2.8
+      open: 11.0.3
+      resolve: 1.22.12
+      tunnel: 0.0.6
+      write-file-atomic: 7.0.1
+    transitivePeerDependencies:
+      - debug
+      - supports-color
+
   acorn-jsx@5.3.2(acorn@8.18.0):
     dependencies:
       acorn: 8.18.0
@@ -2757,40 +2791,6 @@ snapshots:
   pathe@2.0.3: {}
 
   pathval@2.0.1: {}
-
-  picgo@file:../../PicGo-Core(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
-    dependencies:
-      '@hono/node-server': 1.19.17(hono@4.13.7)
-      '@picgo/i18n': 1.0.0
-      '@picgo/store': 2.2.2
-      axios: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
-      chalk: 2.4.2
-      commander: 8.3.0
-      comment-json: 4.6.2
-      cross-spawn: 6.0.6
-      dayjs: 1.11.23
-      dotenv: 17.4.2
-      ejs: 3.1.10
-      form-data: 4.0.6
-      fs-extra: 6.0.1
-      giget: 2.0.0
-      globby: 11.1.0
-      hono: 4.13.7
-      image-size-next: 2.1.1
-      inquirer: 6.5.2
-      is-wsl: 2.2.0
-      js-yaml: 4.3.2
-      lodash: 4.18.1
-      md5: 2.3.0
-      mime-types: 3.0.2
-      minimist: 1.2.8
-      open: 11.0.3
-      resolve: 1.22.12
-      tunnel: 0.0.6
-      write-file-atomic: 7.0.1
-    transitivePeerDependencies:
-      - debug
-      - supports-color
 
   picocolors@1.1.1: {}
 

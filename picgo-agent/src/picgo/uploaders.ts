@@ -26,8 +26,8 @@
  * GUI 的代码 import 了 electron，不能在纯 Node 里跑。）
  */
 
-import { evaluatePluginConfig } from 'picgo'
-import type { IPicGo, IPluginConfig, IUploaderConfigItem } from 'picgo'
+import { evaluatePluginConfig } from '@yeqingky/picgo-core'
+import type { IPicGo, IPluginConfig, IUploaderConfigItem } from '@yeqingky/picgo-core'
 import type { Logger } from '../logger.js'
 import {
   buildCapabilities,

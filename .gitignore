@@ -1,5 +1,6 @@
 # ---- 运行时数据（绝不提交）----
 data/
+data-dev/
 *.db
 *.db-shm
 *.db-wal
@@ -8,8 +9,6 @@ agent-token.txt
 initial-admin-password.txt
 
 # ---- 构建产物 ----
-# PicGo-Core 的 tarball（由 make vendor 生成，Docker 构建需要，不入库）
-deploy/vendor/
 server/picgo-web
 server/bin/
 picgo-agent/dist/

@@ -21,7 +21,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IPicGo } from 'picgo'
+import type { IPicGo } from '@yeqingky/picgo-core'
 import type { Logger } from '../logger.js'
 import type { PluginItem, PluginsListData } from '../types.js'
 import { isGuiOnly } from './capability.js'

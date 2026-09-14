@@ -41,16 +41,25 @@ PicGo-Web 把桌面端 [PicGo](https://github.com/Molunerfinn/PicGo) 的能力�
 
 不需要预装 Go / Node / PicGo —— 镜像内已包含全部运行时。
 
-### 1. 建目录并下载部署文件
+### 1. 获取代码
 
 ```bash
-mkdir picgo-web && cd picgo-web
-
-curl -O https://raw.githubusercontent.com/YeqingKy/PicGo-Web/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/YeqingKy/PicGo-Web/main/.env.example
+git clone https://github.com/YeqingKy/PicGo-Web.git
+cd PicGo-Web
 ```
 
-### 2. 编辑 `.env`
+> **为什么是 clone 而不是只下 `docker-compose.yml`**：
+> compose 里带 `build: context: .`，镜像由仓库内的 `deploy/docker/Dockerfile`
+> 多阶段构建（前端 → 侧车 → Go → 运行时）。只下单个 compose 文件会缺构建上下文。
+>
+> 如果将来发布官方镜像到 registry，也可以只下 compose + `.env` 并注释掉 `build:` 一段，
+> 用 `docker compose pull` 拉镜像。
+
+### 2. 准备 `.env`
+
+```bash
+cp .env.example .env
+```
 
 最小可用配置（其余保持默认即可）：
 
@@ -74,7 +83,7 @@ PICGO_WEB_SECRET_KEY=
 ### 3. 启动
 
 ```bash
-docker compose up -d
+docker compose up -d      # 首次会自动构建镜像（约 1~2 分钟）
 ```
 
 查看状态与日志：
@@ -83,6 +92,9 @@ docker compose up -d
 docker compose ps
 docker compose logs -f picgo-web
 ```
+
+> 用 `make up` / `make logs` / `make down` 更省事（都是同一套 compose 命令的封装）。
+> 改了代码后重新构建：`docker compose up -d --build`（或 `make up-build`）。
 
 ### 4. 拿到管理员密码并登录
 
@@ -184,167 +196,134 @@ docker compose start
 
 > 使用 PostgreSQL 时，数据库不在 `./data` 内，需另行备份（`pg_dump`）。
 
-### 其他部署方式
+### 关于部署方式
 
-自行从源码编译二进制、或用 systemd 托管均可行，但**不作为官方支持的部署路径**，
-遇到问题请以 Docker Compose 为准。构建命令见下一节。
+本项目**只提供 docker compose**：生产用 `docker-compose.yml`，开发用 `docker-compose-dev.yml`。
+
+不提供（也不支持）宿主直跑二进制、systemd、手工 `make build` 等方式 ——
+所有构建都发生在容器内（多阶段构建），保证「开发能跑 = 生产能跑」。
 
 ## 开发与测试（面向开发者）
 
 ### 依赖要求
 
+**只需要 Docker**。Go、Node、pnpm、picgo-core 全部在容器里，宿主一个都不用装。
+
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| Go | 1.25+ | SQLite 使用纯 Go 实现，**无需 CGO** |
-| Node.js | 24+ | 侧车与前端 |
-| pnpm | 10+ | 前端与侧车包管理器 |
-| Docker | 20.10+ | 仅构建镜像时需要 |
+| Docker | 20.10+ | 含 `docker compose` v2 子命令 |
+| Make | 任意 | 可选，用于 `make dev` 等快捷命令（也可直接敲 `docker compose`） |
 
 ### 目录结构
 
 ```
 PicGo-Web/
-├── server/           # Go 后端（Gin + GORM + SQLite/PgSQL），主进程
-├── picgo-agent/      # Node/TS 侧车，持有 picgo-core 实例、插件与上传
-├── web/              # React 前端（Vite + Tailwind + Radix + Zustand）—— 内置 SPA
-├── themes/           # 默认首页主题的**打包产物**（由 `make theme` 生成，作为可替换的起点）
-├── docs/             # 开发文档集（索引见 docs/README.md）
-├── deploy/           # Dockerfile 等构建产物
-├── docker-compose.yml
-├── docker-compose.pgsql.yml
+├── server/                     # Go 后端（Gin + GORM + SQLite/PgSQL），主进程
+├── picgo-agent/                # Node/TS 侧车，持有 picgo-core 实例、插件与上传
+├── web/                        # React 前端（Vite + Tailwind + Radix + Zustand）
+├── docs/                       # 开发文档集（索引见 docs/README.md）
+├── scripts/                    # 端到端验证脚本（e2e-*.sh / smoke-auth.sh）
+├── deploy/docker/
+│   ├── Dockerfile              # 生产镜像（四阶段：前端 → 侧车 → Go → 运行时）
+│   └── Dockerfile.dev          # 开发镜像（三个 target：agent-dev / server-dev / web-dev / e2e）
+├── docker-compose.yml          # 生产（SQLite）
+├── docker-compose.pgsql.yml    # 生产 · PostgreSQL 覆盖
+├── docker-compose-dev.yml      # 开发（三容器 + 热重载）
 ├── Makefile
 └── .env.example
 ```
 
-### 准备 PicGo-Core 本地依赖
-
-侧车需要一份**打过补丁的 picgo-core**，仓库位于与 `PicGo-Web` **同级**的 `PicGo-Core`：
+### 启动开发环境
 
 ```bash
-cd ../PicGo-Core        # 与 PicGo-Web 同级
-git checkout PicGo-Web  # 补丁分支（基于上游 dev / v3.0.2）
-pnpm install
-pnpm build              # 必须构建出 dist/，picgo-agent 通过 file: 依赖它
+make dev          # = docker compose -f docker-compose-dev.yml up
 ```
 
-> - `picgo-agent` 以 `"picgo": "file:../../PicGo-Core"` 引用本地源码，因此**必须先 `pnpm build`**
->   （`dist/` 在 `.gitignore` 中，且该仓库没有 `prepare: build` 钩子，**无法使用 git 依赖**）。
-> - 该分支上的改动清单与「合并上游时的注意事项」见 **`PicGo-Core/FORK-NOTES.md`**。
-> - 该分支的主要改动是让 `upload()` 支持**按次指定图床**（`UploadOptions.uploader`）与
->   **事件归属**（`UploadOptions.contextData`）；不传这些参数时行为与上游一致。
+首次会构建三个镜像（约 1~2 分钟），随后：
 
-### 开发命令
-
-**最常用：一条命令起全部**
-
-```bash
-make dev
-```
-
-它并行启动三个进程（各自独立终端日志，Ctrl-C 一次全部退出）：
-
-| 进程 | 地址 | 说明 |
+| 服务 | 地址 | 热重载方式 |
 |---|---|---|
-| `server` | <http://127.0.0.1:8080> | Go 后端（Gin） |
-| `agent` | <http://127.0.0.1:36678> | picgo-agent 侧车（仅 127.0.0.1，带 `X-Agent-Token`） |
-| `web` | <http://127.0.0.1:5173> | Vite dev server（`/api` 代理到 8080） |
+| `web` | <http://localhost:5173> | Vite HMR（改 TS/TSX 即刷新） |
+| `server` | <http://localhost:8080> | `go run`（改 Go 需重启容器：`make dev-down && make dev`） |
+| `agent` | 容器内 `agent:36678` | `tsx watch`（改 TS 自动重启） |
 
-**分开跑（便于单独调试）**
+**拿管理员初始密码**：
+
+```bash
+make dev-logs-server        # 看 WARN 行里的 password
+# 或直接读文件
+cat data-dev/initial-admin-password.txt
+```
+
+登录邮箱固定为 **`admin@localhost`**；**首次登录会强制修改密码**。
+
+**常用命令**：
 
 | 命令 | 作用 |
 |---|---|
-| `make server` | 只启动 Go 后端（`:8080`） |
-| `make agent` | 只启动 Node 侧车（`127.0.0.1:36678`） |
-| `make web` | 只启动前端 Vite dev server（代理 `/api` → `:8080`） |
+| `make dev` | 起开发环境（前台，Ctrl-C 停止） |
+| `make dev-up` | 起开发环境（后台） |
+| `make dev-down` | 停（保留数据与卷） |
+| `make dev-reset` | 停并**删除数据**（需输入 yes 确认，不可恢复） |
+| `make dev-logs` | 跟踪全部日志 |
+| `make dev-logs-server` | 只看后端日志 |
+| `make dev-shell-server` | 进入后端容器（可跑 `go test`、`make` 等） |
+| `make dev-shell-agent` | 进入侧车容器 |
+| `make dev-ps` | 容器状态 |
+| `make dev-build` | 改了依赖后重建镜像 |
 
-**首次启动要做的两件事**
+> **数据目录**：开发用 `./data-dev/`（与生产的 `./data/` 隔离）。
+> `node_modules` 与 Go 模块缓存放在**具名卷**里，容器内安装、容器内使用 ——
+> 避免宿主（Linux/WSL）与容器（Alpine）的平台差异导致的二进制不兼容。
 
-1. **准备 PicGo-Core**（agent 依赖它，且 `dist/` 被 gitignore，必须先构建）：
-
-   ```bash
-   cd ../PicGo-Core        # 与 PicGo-Web 同级
-   git checkout PicGo-Web  # 补丁分支（基于上游 dev / v3.0.2）
-   pnpm install && pnpm build
-   ```
-
-   或直接 `make deps`（会一并安装三端依赖）。
-
-2. **拿管理员初始密码**：首次启动时后端会生成随机密码，出现在两处：
-
-   ```bash
-   # 方式一：看后端启动日志（WARN 级）
-   #   已创建初始管理员账号 ... password":"xxxxxxxx"
-
-   # 方式二：读文件（权限 0600）
-   cat data/initial-admin-password.txt
-   ```
-
-   登录邮箱固定为 **`admin@localhost`**；**首次登录会强制修改密码**，然后即可正常使用。
-
-**不装 Node 也能跑通全链路**（仅用于前端联调 / CI）：
+**两个可选开关**（通过环境变量传给 compose）：
 
 ```bash
-PICGO_WEB_AGENT_MOCK=true make server
-# 或写进 .env：PICGO_WEB_AGENT_MOCK=true
+# 前端走内置 mock，完全脱离后端开发
+VITE_USE_MOCK=true docker compose -f docker-compose-dev.yml up web
+
+# 侧车用内存 mock（不跑 picgo-core，验证「无 Node 也能起」）
+# 生产容器里：PICGO_WEB_AGENT_MOCK=true docker compose up -d
 ```
-
-**前端脱离后端开发**（走内置 mock）：
-
-```bash
-cd web && VITE_USE_MOCK=true pnpm dev
-```
-
-> 三端都有热重载；后端在 `PICGO_WEB_AGENT_AUTOSTART=false`（默认）时不会自己拉起侧车，
-> 正好配合手动启动的 agent。
-
-### 构建与打包
-
-| 命令 | 作用 |
-|---|---|
-| `make theme` | 导出默认主题到 `themes/default/`（源：`server/internal/theme/embedded`，自包含单文件） |
-| `make build` | 构建全部产物：内置 SPA 的 `dist`（同步到 `server/internal/webfs/dist` 供 `go:embed`）+ 侧车产物 + Go 静态二进制（`CGO_ENABLED=0`） |
-| `make vendor` | 把打过补丁的 PicGo-Core 打成 `deploy/vendor/picgo-*.tgz`（Docker 构建需要） |
-| `make pack` | 产出可发布包：二进制 + 主题 + PicGo-Core tarball |
-| `make docker-build` | 构建 Docker 镜像（自动先 `vendor`） |
-
-> **内置 SPA 用 `go:embed` 打进二进制**（图库 / 上传 / 后台 / 登录页等**全部内置**，单二进制、无外部依赖）。
-> `make theme` 导出的 `themes/default/` 是给用户一个**可替换的起点**（放一份到 `./data/themes/` 就能改），
-> 同时二进制里**也内嵌同一份**作为主题缺失/损坏时的兜底（D94）——因此即使 `data/themes/` 被删空也不会白屏。
->
-> **本地验证主题**：`make theme` 后把 `themes/default/` 拷到 `./data/themes/default/`，
-> 用 `make server` 起后端访问 <http://localhost:8080> 即可看到效果（`make web` 的 Vite dev server 走的是内置 SPA）。
 
 ### 测试与检查
 
-**全仓一次跑完**（串行执行三端检查，失败即停）：
+全部在容器内执行（保证与部署环境一致）：
 
 ```bash
-make check
+make check          # 三端：server（vet+test+编译）/ agent / web
+make check-server   # 只跑后端
+make check-agent    # 只跑侧车
+make check-web      # 只跑前端
 ```
 
-**各端单独执行**：
+**端到端验证**（真实起服务 + 用临时数据目录，不污染 `data-dev`）：
 
 ```bash
-# Go 后端
-cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo-web
-
-# Node 侧车
-cd picgo-agent && pnpm lint && pnpm typecheck && pnpm test
-
-# 前端
-cd web && pnpm lint && pnpm typecheck && pnpm build
-
-# PicGo-Core（补丁仓库）
-cd ../PicGo-Core && pnpm lint && pnpm test
+make e2e            # 全部：鉴权 + 主题 + Lsky
+make e2e-auth       # 鉴权与用户（登录/刷新/改密/API Token/限流/首启引导）
+make e2e-theme      # 主题系统（分发算法/兜底/zip 九条校验/卸载规则）
+make e2e-lsky       # Lsky v1 兼容层（9 端点 + 信封一致性）
 ```
 
-**端到端验证**（会真实起服务 + 用临时数据目录，**不污染 `./data`**）：
+### picgo-core 的来源
 
-```bash
-make e2e-theme    # 主题系统：分发算法/认证页保留/防穿越/兜底/zip 安装 9 条校验（73 项）
-make e2e-lsky     # Lsky 兼容层：9 端点 + 信封一致性 11 个错误场景（20 项）
-make e2e-all      # 两者串行
-```
+侧车依赖 **[`@yeqingky/picgo-core`](https://www.npmjs.com/package/@yeqingky/picgo-core)** ——
+这是 [PicGo-Core](https://github.com/PicGo/PicGo-Core) 的 fork（`PicGo-Web` 分支），
+从 npm 直接安装，**不需要本地源码，也不需要预先打包 tarball**。
+
+该 fork 的增量改动（不改上游行为，只在显式传参时生效）：
+
+- `UploadOptions.uploader` —— **按次指定图床**（并发向多个图床投递的基础）
+- `UploadOptions.contextData` —— 让全局事件能归属到具体任务
+- `createContext` 的 per-context 配置覆盖 —— 让插件读 `picBed.*` 自动生效（插件零适配）
+- `Lifecycle.step` 改为局部变量 —— 修并发串扰
+
+改动清单与「rebase 上游时的注意事项」见该仓库的 `FORK-NOTES.md`。
+
+> 升级方式：改 `picgo-agent/package.json` 里的版本号 → `make dev-build`。
+> 镜像构建时会断言补丁确实存在（缺 `contextData` 即构建失败），
+> 避免「装了个没补丁的版本、上传静默用错图床」这类极难排查的问题。
 
 ### 环境变量
 

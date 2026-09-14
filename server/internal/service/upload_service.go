@@ -74,6 +74,16 @@ type UploadService struct {
 	poolWG   sync.WaitGroup
 	poolSize int
 
+	// patchChecker 报告 picgo-core 的补丁是否齐备（可为 nil = 不检查）。
+	//
+	// 为什么需要：`UploadOptions.uploader` 是本项目给 PicGo-Core 打的补丁。
+	// 若依赖被换成上游原版，并发时两个批次会互相覆盖 `picBed.uploader`，
+	// **静默把图传到错误的图床**（不报错、链接可用，只是落错地方）。
+	// 因此补丁缺失时必须把并发度强制降到 1（安全但慢）。
+	patchChecker func() bool
+	// patchWarned 保证「补丁缺失」的告警只打一次（避免刷日志）。
+	patchWarned atomic.Bool
+
 	// accepting 为假时拒绝新任务（优雅关闭中）。
 	accepting atomic.Bool
 	// started 标记 Start 是否已被调用（未启动时不允许入队）。
@@ -177,7 +187,7 @@ func (s *UploadService) Start(ctx context.Context) error {
 	// 3. 拉起 worker
 	s.poolStop = make(chan struct{})
 	s.poolSize = s.concurrency()
-	s.startWorkersLocked(s.poolSize)
+	s.startWorkersLocked(s.poolSize, s.poolStop)
 
 	s.accepting.Store(true)
 	s.started.Store(true)
@@ -191,9 +201,7 @@ func (s *UploadService) Start(ctx context.Context) error {
 	// 5. 配置变更时动态调整并发度
 	s.settings.OnChanged(func(ev settings.ChangedEvent) {
 		if ev.Key == "upload.concurrency" {
-			n := s.concurrency()
-			s.Resize(n)
-			s.log.Info("上传并发度已调整", "concurrency", n)
+			s.RefreshConcurrency()
 		}
 	})
 	return nil
@@ -238,7 +246,17 @@ func (s *UploadService) Shutdown(ctx context.Context) {
 	s.started.Store(false)
 }
 
+// SetPatchChecker 注入「picgo-core 补丁是否齐备」的判据。
+//
+// 由组合根（main）接上 `agent.StatusHolder.PatchesComplete`。
+// 传 nil 表示不检查（测试与 MOCK 模式）。
+func (s *UploadService) SetPatchChecker(fn func() bool) { s.patchChecker = fn }
+
 // concurrency 返回当前应使用的并发度（至少 1）。
+//
+// ⚠️ **补丁缺失时强制返回 1**：并发需要 `UploadOptions.uploader` 才能把
+// 「本批用哪个图床」隔离到各自的 context；没有它就只能靠全局 `picBed.uploader`，
+// 并发必然互相覆盖。宁可慢，也不能把图传到错误的图床。
 func (s *UploadService) concurrency() int {
 	n := int(s.settings.GetInt("upload.concurrency", 1))
 	if n < 1 {
@@ -247,7 +265,37 @@ func (s *UploadService) concurrency() int {
 	if n > 64 {
 		n = 64
 	}
+
+	if n > 1 && s.patchChecker != nil && !s.patchChecker() {
+		if s.patchWarned.CompareAndSwap(false, true) {
+			s.log.Warn("picgo-core 补丁缺失，并发上传不安全 —— 已强制降级为单并发"+
+				"（请确认 agent 依赖是 @yeqingky/picgo-core 而非上游 picgo）",
+				"requested", n, "effective", 1)
+		}
+		return 1
+	}
 	return n
+}
+
+// RefreshConcurrency 按当前设置与补丁状态重新计算并发度并调整 worker 池。
+//
+// 调用时机：
+//   - `upload.concurrency` 设置变更（Start 里已注册）
+//   - **agent 状态变化**（启动时 agent 尚未就绪 → 补丁状态未知 → 保守用 1；
+//     agent 就绪且补丁齐备后需要升到配置值）
+func (s *UploadService) RefreshConcurrency() {
+	if !s.started.Load() {
+		return
+	}
+	n := s.concurrency()
+	s.poolMu.Lock()
+	current := s.poolSize
+	s.poolMu.Unlock()
+	if n == current {
+		return
+	}
+	s.Resize(n)
+	s.log.Info("上传并发度已调整", "concurrency", n)
 }
 
 // Resize 调整 worker 数量（配置变更时调用）。
@@ -272,24 +320,25 @@ func (s *UploadService) Resize(n int) {
 
 	s.poolStop = make(chan struct{})
 	s.poolSize = n
-	s.startWorkersLocked(n)
+	s.startWorkersLocked(n, s.poolStop)
 }
 
-// startWorkersLocked 拉起 n 个 worker。调用方需持有 poolMu。
-func (s *UploadService) startWorkersLocked(n int) {
+// startWorkersLocked 拉起 n 个 worker（调用方需持有 poolMu）。
+//
+// ⚠️ **stop 必须作为参数传入，不能让 worker 自己去 s.poolStop 读**：
+// `Resize` 会持 `poolMu` 调 `poolWG.Wait()`，若 worker 在启动时也要拿
+// `poolMu`，就形成「持锁等 worker 退出、worker 等锁退出」的**死锁** ——
+// 表现为运行期一改 `upload.concurrency` 服务就卡死（已由并发闸门测试覆盖）。
+func (s *UploadService) startWorkersLocked(n int, stop <-chan struct{}) {
 	for i := 0; i < n; i++ {
 		s.poolWG.Add(1)
-		go s.worker(i)
+		go s.worker(i, stop)
 	}
 }
 
 // worker 是单个执行单元。
-func (s *UploadService) worker(idx int) {
+func (s *UploadService) worker(idx int, stop <-chan struct{}) {
 	defer s.poolWG.Done()
-
-	s.poolMu.Lock()
-	stop := s.poolStop
-	s.poolMu.Unlock()
 
 	for {
 		select {

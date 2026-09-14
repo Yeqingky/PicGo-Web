@@ -1,0 +1,171 @@
+# PicGo-Web 开发环境（唯一开发方式）
+#
+# 设计目标：**一条命令起全套开发环境**，与生产用同一套镜像定义
+# （只是把前端换成 Vite dev server、后端/侧车用源码 + 热重载）。
+#
+#   make dev            # = docker compose -f docker-compose-dev.yml up
+#   make dev-build      # 改了依赖后重新构建
+#   make dev-logs       # 跟踪日志
+#   make dev-down       # 停止
+#
+# 与生产 compose 的差异：
+#   · 源码以**挂载卷**方式进容器（改代码即热重载，不用重新 build 镜像）
+#   · 前端跑 Vite dev server（HMR），而不是构建静态产物
+#   · Go 用 `go run`（air 风格的重启由 go run 自身完成；如需自动重载可加 air）
+#   · 数据目录用 `./data-dev`，与生产的 `./data` **隔离**，避免互相污染
+#
+# 端口：
+#   5173  前端（Vite dev server，/api 代理到 8080）
+#   8080  Go 后端
+#   36678 picgo-agent（仅容器内可达，开发时如需直连可临时加 ports）
+
+name: picgo-web-dev
+
+services:
+  # ---------------------------------------------------------------------------
+  # picgo-agent：Node 侧车（持有 picgo-core 实例）
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dev
+      target: agent-dev
+    container_name: picgo-web-dev-agent
+    restart: unless-stopped
+    working_dir: /app/picgo-agent
+    volumes:
+      # 源码挂载：改 TS 即由 tsx watch 热重载
+      - ./picgo-agent:/app/picgo-agent
+      # node_modules 用**具名卷**而不是宿主目录：
+      #   宿主的 node_modules 是 Linux/WSL 本地装的，直接挂进去会与容器内的
+      #   平台特定二进制（esbuild 等）冲突。具名卷保证「容器内安装、容器内使用」。
+      - agent_node_modules:/app/picgo-agent/node_modules
+      # picgo 的 baseDir（config.json + node_modules 里的插件）
+      - ./data-dev/picgo:/data/picgo
+    environment:
+      PICGO_AGENT_HOST: "0.0.0.0"
+      PICGO_AGENT_PORT: "36678"
+      PICGO_AGENT_CONFIG_PATH: "/data/picgo/config.json"
+      # 开发环境允许无令牌，省去每次生成/同步令牌的麻烦。
+      # ⚠️ 仅限 dev：生产由 Go 生成随机令牌并注入子进程（internal/agent/lifecycle.go）。
+      PICGO_AGENT_ALLOW_NO_TOKEN: "true"
+      PICGO_AGENT_LOG_LEVEL: "debug"
+      TZ: "Asia/Shanghai"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:36678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks: [devnet]
+
+  # ---------------------------------------------------------------------------
+  # server：Go 后端（源码挂载，go run 启动）
+  # ---------------------------------------------------------------------------
+  server:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dev
+      target: server-dev
+    container_name: picgo-web-dev-server
+    restart: unless-stopped
+    working_dir: /app/server
+    depends_on:
+      agent:
+        condition: service_healthy
+    volumes:
+      - ./server:/app/server
+      - go_pkg_mod:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - ./data-dev:/data
+      # 前端源码挂载（只读）：server 的热重载不需要它，但便于在容器内跑
+      # `make build-web` 验证 embed 接线
+      - ./web:/app/web:ro
+    environment:
+      PICGO_WEB_LISTEN: "0.0.0.0:8080"
+      PICGO_WEB_DATA_DIR: "/data"
+      PICGO_WEB_DB_DRIVER: "sqlite"
+      PICGO_WEB_SQLITE_PATH: "/data/picgo-web.db"
+      PICGO_WEB_LOG_LEVEL: "debug"
+      PICGO_WEB_DEV: "true"
+      # ⚠️ 开发环境不让 Go 拉起 agent —— agent 由本 compose 独立管理
+      #    （两个服务各自可单独重启，日志也分开看）
+      PICGO_WEB_AGENT_AUTOSTART: "false"
+      PICGO_WEB_AGENT_URL: "http://agent:36678"
+      PICGO_WEB_AGENT_TOKEN: "dev-token"
+      # 静态资源从宿主的 web/dist 读（若已构建）；未构建时用内嵌占位页
+      PICGO_WEB_STATIC_DIR: "/app/web/dist"
+      GIN_MODE: "debug"
+      TZ: "Asia/Shanghai"
+    ports:
+      - "8080:8080"
+    networks: [devnet]
+
+  # ---------------------------------------------------------------------------
+  # web：Vite dev server（HMR）
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dev
+      target: web-dev
+    container_name: picgo-web-dev-web
+    restart: unless-stopped
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web
+      - web_node_modules:/app/web/node_modules
+    environment:
+      # Vite 代理目标指向 compose 内的 server 服务
+      VITE_API_PROXY_TARGET: "http://server:8080"
+      # 前端开发时可切到 mock（脱离后端独立开发）
+      VITE_USE_MOCK: "${VITE_USE_MOCK:-false}"
+      TZ: "Asia/Shanghai"
+    ports:
+      - "5173:5173"
+    networks: [devnet]
+
+  # ---------------------------------------------------------------------------
+  # e2e：端到端验证（可选，用 profile 隔离，`up` 时不会启动）
+  # ---------------------------------------------------------------------------
+  #
+  # 跑法（Makefile 已封装为 make e2e-*）：
+  #   docker compose -f docker-compose-dev.yml run --rm --no-deps e2e ./scripts/e2e-lsky.sh
+  #
+  # 用独立的端口（18080 / 36679 / 39003），与 dev 环境（8080/36678/5173）不冲突，
+  # 因此两者可以同时跑。
+  e2e:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dev
+      target: e2e
+    profiles: ["e2e"]
+    working_dir: /app
+    volumes:
+      - ./server:/app/server
+      - ./picgo-agent:/app/picgo-agent
+      - ./web:/app/web
+      - ./scripts:/app/scripts:ro
+      - e2e_agent_modules:/app/picgo-agent/node_modules
+      - e2e_web_modules:/app/web/node_modules
+      - go_pkg_mod:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    environment:
+      WORK: /tmp/e2e
+      LISTEN_PORT: "18080"
+      AGENT_PORT: "36679"
+      MOCK_BED_PORT: "39003"
+      TZ: "Asia/Shanghai"
+    networks: [devnet]
+
+volumes:
+  agent_node_modules:
+  web_node_modules:
+  go_pkg_mod:
+  go_build_cache:
+  e2e_agent_modules:
+  e2e_web_modules:
+
+networks:
+  devnet:
+    driver: bridge
