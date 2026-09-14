@@ -141,7 +141,7 @@ func TestNewFromString(t *testing.T) {
 
 	// 三种输入形式都应被接受
 	forms := []string{
-		string(raw),                            // 原样 32 字节
+		string(raw), // 原样 32 字节
 		"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", // hex
 		"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",                     // base64
 	}

@@ -23,11 +23,11 @@ const (
 //
 // **driver 信息只在 job 层**（D38 一批一驱动），JobItems 不重复存。
 type Job struct {
-	ID         uint64 `gorm:"primaryKey;autoIncrement"`
-	UID        string `gorm:"size:32;uniqueIndex;not null"`  // job_ 前缀
-	Kind       string `gorm:"size:32;index;not null"`        // upload|plugin.install|...
-	Status     string `gorm:"size:16;index;not null"` // queued|running|succeeded|failed
-	Progress   int    `gorm:"not null;default:0"`            // 0..100
+	ID       uint64 `gorm:"primaryKey;autoIncrement"`
+	UID      string `gorm:"size:32;uniqueIndex;not null"` // job_ 前缀
+	Kind     string `gorm:"size:32;index;not null"`       // upload|plugin.install|...
+	Status   string `gorm:"size:16;index;not null"`       // queued|running|succeeded|failed
+	Progress int    `gorm:"not null;default:0"`           // 0..100
 
 	UserUID    string `gorm:"size:32;index"` // 发起者（系统任务为空）
 	StorageUID string `gorm:"size:32;index"` // 一批一驱动（D38）

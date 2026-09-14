@@ -92,8 +92,13 @@ build-server: ## 编译 Go 静态二进制（CGO_ENABLED=0）
 	@echo "✓ $(BIN)"
 
 .PHONY: build-web
-build-web: ## 构建前端 SPA（内置进二进制）
+build-web: ## 构建前端 SPA（并同步到 internal/webfs/dist 供 go:embed）
 	@cd $(WEB_DIR) && pnpm build
+	@echo "→ 同步前端产物到 server/internal/webfs/dist（go:embed 是编译期行为，必须先同步再编译）"
+	@rm -rf $(SERVER_DIR)/internal/webfs/dist/assets
+	@find $(SERVER_DIR)/internal/webfs/dist -maxdepth 1 -type f ! -name '.gitkeep' -delete
+	@cp -r $(WEB_DIR)/dist/. $(SERVER_DIR)/internal/webfs/dist/
+	@echo "✓ $(SERVER_DIR)/internal/webfs/dist"
 
 .PHONY: build-agent
 build-agent: ## 构建 picgo-agent 产物

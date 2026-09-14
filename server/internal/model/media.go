@@ -19,11 +19,11 @@ const (
 //     图片本身的公开性由图床（PicGo 驱动）决定，本项目无权也无法控制。
 //     **不要后续添加 visibility 列。**
 type Upload struct {
-	ID           uint64 `gorm:"primaryKey;autoIncrement"`
-	UID          string `gorm:"size:32;uniqueIndex;not null"` // up_ 前缀的 ULID
-	UserUID      string `gorm:"size:32;index;not null"`
-	StorageUID   string `gorm:"size:32;index;not null"` // 引用 StorageConfigs.UID
-	AlbumUID     string `gorm:"size:32;index"`          // 空 = 不属于任何相册
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	UID        string `gorm:"size:32;uniqueIndex;not null"` // up_ 前缀的 ULID
+	UserUID    string `gorm:"size:32;index;not null"`
+	StorageUID string `gorm:"size:32;index;not null"` // 引用 StorageConfigs.UID
+	AlbumUID   string `gorm:"size:32;index"`          // 空 = 不属于任何相册
 
 	FileName     string `gorm:"size:255;not null"` // 最终文件名（含扩展名）
 	OriginalName string `gorm:"size:255"`          // 原始上传文件名

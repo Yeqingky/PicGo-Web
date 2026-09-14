@@ -35,15 +35,15 @@ const (
 
 // Item 是一个配置项的完整视图（元数据 + 值 + 来源）。
 type Item struct {
-	Key         string      `json:"Key"`
-	Category    string      `json:"Category"`
-	Type        string      `json:"Type"`
-	Value       any         `json:"Value"`
-	Default     any         `json:"Default"`
-	Source      Source      `json:"Source"`
-	Secret      bool        `json:"Secret"`
-	HasValue    bool        `json:"HasValue"` // secret 类型：是否已设置
-	Description string      `json:"Description"`
+	Key         string `json:"Key"`
+	Category    string `json:"Category"`
+	Type        string `json:"Type"`
+	Value       any    `json:"Value"`
+	Default     any    `json:"Default"`
+	Source      Source `json:"Source"`
+	Secret      bool   `json:"Secret"`
+	HasValue    bool   `json:"HasValue"` // secret 类型：是否已设置
+	Description string `json:"Description"`
 }
 
 // ChangedEvent 描述一次配置变更。

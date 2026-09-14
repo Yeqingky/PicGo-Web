@@ -73,6 +73,18 @@ var Keys = []Key{
 	// ---------- 主题（仅站点级选择，主题自身的配置在 ThemeConfigs） ----------
 	{Name: "theme.active", Category: CategoryTheme, Type: TypeString, Default: "default",
 		Description: "当前启用的主题 ID"},
+	// 以下五项是 zip 安装的**上传保护阈值**（D96），与任何主题的 schema 无关，
+	// 因此是站点级键。默认值与 docs/OPERATIONS.md §8.9 一致。
+	{Name: "theme.maxPackageBytes", Category: CategoryTheme, Type: TypeInt, Default: int64(64) << 20,
+		Description: "主题 zip 包大小上限（字节），默认 64 MiB"},
+	{Name: "theme.maxExtractBytes", Category: CategoryTheme, Type: TypeInt, Default: int64(512) << 20,
+		Description: "主题解压后总体积上限（字节），防 zip bomb，默认 512 MiB"},
+	{Name: "theme.maxFileBytes", Category: CategoryTheme, Type: TypeInt, Default: int64(128) << 20,
+		Description: "主题包内单个文件大小上限（字节），默认 128 MiB"},
+	{Name: "theme.maxFiles", Category: CategoryTheme, Type: TypeInt, Default: 10000,
+		Description: "主题包内文件数量上限，默认 10000"},
+	{Name: "theme.maxManifestBytes", Category: CategoryTheme, Type: TypeInt, Default: int64(1) << 20,
+		Description: "主题 manifest.json 大小上限（字节），默认 1 MiB"},
 
 	// ---------- 用户 ----------
 	{Name: "user.defaultCapacityBytes", Category: CategoryUser, Type: TypeInt, Default: int64(5) << 30,

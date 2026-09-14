@@ -271,11 +271,102 @@ cd server && go vet ./... && go test ./... && CGO_ENABLED=0 go build ./cmd/picgo
 | W0 PicGo-Core fork 与补丁 | ✅ 已完成（`6419c2f`，250 单测 + lint 通过） |
 | W1 契约与骨架 | ✅ 已完成（docs 九份 + 根配置 + Makefile + compose） |
 | **W2 Go 基础设施** | ✅ **已完成**（config/logger/database/model/repository/crypto/id/settings/response/middleware/server + 测试） |
-| W3 Go 鉴权与用户 | ⬜ 待开始 |
-| W4 Agent 内核 | ⬜ 待开始 |
-| W5 Go 业务（存储/上传队列/图库/相册） | ⬜ 待开始 |
-| W6 Go 日志与邮件 | ⬜ 待开始 |
+| **W3 Go 鉴权与用户** | ✅ **已完成**（auth/service/handler + 首启引导） |
+| **W4 Agent 内核** | ✅ **已完成**（picgo-agent：168 单测 + typecheck + lint 通过） |
+| **W5 Go 业务（存储/上传队列/图库/相册）** | ✅ **已完成** |
+| **W6 Go 日志与邮件（含删除/清理/操作日志/回调）** | ✅ **已完成** |
 | W7 前端基座 | ⬜ 待开始 |
 | W8 前端页面 | ⬜ 待开始 |
 | W9 Lsky 兼容 + 静态托管 | ⬜ 待开始 |
 | W10 主题系统 | ⬜ 待开始 |
+
+
+---
+
+## 11. W5/W6 交付说明（2026-02）
+
+### 新增包与文件
+
+| 包 | 文件 | 职责 |
+|---|---|---|
+| `internal/agent` | `types.go` `dto.go` `client.go` `mock.go` `README.md` | picgo-agent 客户端（真实 HTTP + 内存 mock） |
+| `internal/events` | `hub.go` `bridge.go` `README.md` | 进程内 SSE 总线 + agent SSE 桥 |
+| `internal/mail` | `sender.go` | SMTP 发信（`net/smtp`，支持 ssl / starttls / none） |
+| `internal/scheduler` | `scheduler.go` | 每日日志清理（`time.Ticker`，不引 cron 库） |
+| `internal/repository` | `storage_repo.go` `upload_repo.go` `album_repo.go` `job_repo.go` `log_query_repo.go` `setting_query_repo.go` `user_ext_repo.go` | 新增数据访问；**并给 W3 的 `LogRepo`/`UserRepo`/`SettingRepo` 追加方法**（同包不同文件，无需改动 W3 文件） |
+| `internal/service` | `storage_service.go` `upload_service.go` `gallery_service.go` `album_service.go` `job_service.go` `log_service.go` `email_service.go` `plugin_service.go` `audit_adapter.go` `agent_err.go` | 业务规则与事务 |
+| `internal/handler` | `business.go`（**接线入口**）`storage.go` `upload.go` `album.go` `job.go` `log.go` `email.go` `plugin.go` `helpers.go` | HTTP 层 |
+
+### 接线方式（**重要**）
+
+`internal/server/server.go` 由 W10（主题）负责改造，因此本工作流的接线放在：
+
+1. **`handler.RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, error)`**
+   —— 挂载 `/storage/**`（admin）、`/uploads/**`、`/albums/**`、`/jobs/**`、`/events`、
+   `/logs/**`（admin）、`/plugins/**`（admin）、`/settings/mail/test`（admin）、
+   以及**免鉴权**的 `/auth/forgot-password` 与 `/auth/reset-password`。
+2. **`cmd/picgo-web/main.go`** —— 在 `server.New(...)` **之后**用 `app.Engine().Group("/api/web/v1")`
+   补挂业务路由（gin 的路由树与 NoRoute 分离，后注册完全安全），
+   并负责：构造 agent 客户端、构造 Hub、启动 agent 事件桥与健康探测、
+   执行存储配置 reconcile、启动上传队列、启动定时任务、**按序优雅关闭**。
+
+> 若将来把 `Agent`/`Hub` 收进 `server.Deps`，把上面第 2 步的两块搬进 `registerRoutes()` 即可。
+
+### 两个必须知道的坑（已修，均有回归测试）
+
+#### 1. `col()` 不能当 Updates/Update 的列名，`Group()` 要传裸名
+
+`internal/repository/col()` 只为**原样透传**的 SQL 片段加引号
+（`Where` 原生字符串 / `Select` / `Order` / `Exec` / `Raw`）。
+以下两种写法会让 GORM **再包一层引号**，生成非法 SQL：
+
+| 错误写法 | 生成的 SQL | 后果 |
+|---|---|---|
+| `Updates(map[string]any{col("X"): v})` | `SET """X"""=v` | `no such column: "X"` |
+| `Group(col("X"))` | `GROUP BY """X"""` | 同上（且**只在 SQLite 报错**，本地才看得见） |
+
+正确写法：`Update("X", v)` / `Updates(map[string]any{"X": v})` / `Group("X")`。
+
+> 这个坑第一次出现时表现为「上传成功但任务永远停在 queued」——
+> 因为结算任务时 `CountItemsByStatus` 静默失败。
+> 现已改为**一次查 items、在 Go 里计数**，不再依赖 `GROUP BY` + 列别名映射。
+
+#### 2. `Hub.Close()` 与订阅者 `defer cancel()` 相撞会 panic
+
+`Close()` 会关闭所有订阅者通道并清空订阅表；与此同时仍在运行的 SSE handler
+会执行 `defer cancel()`。若 `cancel()` 无条件 `close(ch)`，就会
+`panic: close of closed channel` —— **优雅关闭时反而崩掉**。
+
+修法：`cancel()` 在锁内判断订阅是否仍在表里，不在（说明 `Close` 已处理）就跳过。
+
+### 新增配置键
+
+**无。** 本工作流用到的键（`upload.*` / `log.*` / `mail.*` / `oauth.github.enabled`
+/ `integration.lsky.*`）都已在 `internal/config/defaults.go` 中声明。
+
+### 端到端验证（`PICGO_WEB_AGENT_MOCK=true` 实跑）
+
+```
+登录（首启随机密码）→ 未改密访问业务端点 40301 → 改密 → 重新登录
+→ 建存储配置（响应中 token 为 ******）
+→ 上传 2 张图 → 任务 succeeded / progress=100
+→ 图库列表（含 StorageName）→ 外链三种格式
+→ 统计（ByStorage / ByExtension 中文名可读）
+→ 删除（退还配额、如实报告「驱动不支持远端删除」）
+→ SSE 收到 job.started / upload.progress(0,100) / upload.finished / job.finished
+→ 操作日志（含密钥脱敏）→ 任务清理 → 插件/驱动/日志类型端点
+```
+
+安全断言全部通过：
+
+| 断言 | 结果 |
+|---|---|
+| 存储配置响应 / 详情 / 列表**都不含密钥明文** | ✅ |
+| **审计日志** `Detail.Config.token` = `******` | ✅ |
+| **进程日志**不含密钥明文 | ✅ |
+| **数据库文件**不含密钥明文（AES-256-GCM） | ✅ |
+| 未登录 → 401；普通用户访问 admin 端点 → 40301（不是 40302） | ✅ |
+| 配额不足 → **40302**（与 40301 严格区分） | ✅ |
+| 普通用户 `Scope=all` 被**静默降级**为 `mine` | ✅ |
+| `RawOutput` 保留 picgo 原生字段名（含插件回写的 `sha`） | ✅ |
+| `manifest` 之外的 picgo 私有键（如 `uploaded`）不被清掉 | ✅ |

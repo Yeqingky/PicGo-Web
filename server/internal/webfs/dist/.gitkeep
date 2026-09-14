@@ -1,0 +1,5 @@
+# 占位文件：保证 `//go:embed all:dist` 在**未构建前端**时也能编译通过。
+#
+# 真实产物由 `make build-web` 从 web/dist 同步到本目录（本目录除 .gitkeep 外
+# 全部被 .gitignore 忽略）。运行时若发现 dist/index.html 缺失，
+# ServeSPA 会返回「前端尚未构建」的提示页，而不是 404/白屏。

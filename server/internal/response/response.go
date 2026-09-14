@@ -27,19 +27,19 @@ const (
 
 	CodeInvalidParam Code = 40001
 
-	CodeBadCredentials Code = 40101 // 邮箱或密码错误
-	CodeUnauthorized   Code = 40102 // 未登录或令牌无效
-	CodeTokenExpired   Code = 40103
+	CodeBadCredentials  Code = 40101 // 邮箱或密码错误
+	CodeUnauthorized    Code = 40102 // 未登录或令牌无效
+	CodeTokenExpired    Code = 40103
 	CodeAccountDisabled Code = 40104
 
-	CodeForbidden Code = 40301 // 权限不足
+	CodeForbidden     Code = 40301 // 权限不足
 	CodeQuotaExceeded Code = 40302 // 配额不足（D20）
 
 	CodeNotFound Code = 40401
 	CodeConflict Code = 40901
 	CodeTooMany  Code = 42901
 
-	CodeInternal        Code = 50001
+	CodeInternal         Code = 50001
 	CodeAgentUnavailable Code = 50002
 	CodeUploadFailed     Code = 50003
 	CodePluginFailed     Code = 50004
@@ -110,7 +110,7 @@ func (c Code) Message() string {
 
 // Envelope 是统一响应体。
 type Envelope struct {
-	Code    Code `json:"Code"`
+	Code    Code   `json:"Code"`
 	Message string `json:"Message"`
 	Data    any    `json:"Data"`
 }

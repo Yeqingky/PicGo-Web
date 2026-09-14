@@ -16,6 +16,11 @@ web/dist/
 web/node_modules/
 themes/
 
+# 内置 SPA 的 embed 目录：由 `make build-web` 从 web/dist 同步进来。
+# 只保留 .gitkeep（保证 `//go:embed all:dist` 在未构建前端时也能编译）。
+server/internal/webfs/dist/*
+!server/internal/webfs/dist/.gitkeep
+
 # ---- 环境 ----
 .env
 .env.local

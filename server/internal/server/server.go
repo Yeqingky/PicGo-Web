@@ -23,6 +23,8 @@ import (
 	"github.com/YeqingKy/PicGo-Web/server/internal/response"
 	"github.com/YeqingKy/PicGo-Web/server/internal/service"
 	"github.com/YeqingKy/PicGo-Web/server/internal/settings"
+	"github.com/YeqingKy/PicGo-Web/server/internal/theme"
+	"github.com/YeqingKy/PicGo-Web/server/internal/webfs"
 )
 
 // Version 是程序版本。发布时与 schema 版本一起记入 CHANGELOG。
@@ -143,9 +145,85 @@ func (a *App) registerRoutes() error {
 	)
 	handler.NewUserHandler(userSvc, a.deps.Log).Register(usersGroup)
 
-	// 未匹配的 /api/** 一律返回 JSON 404（不参与 SPA 回退）
-	a.engine.NoRoute(a.handleNoRoute)
+	// ---- 主题系统（D94–D99）----
+	//
+	// 模型：内置 SPA（webfs，go:embed web/dist）提供**全部页面**的默认实现；
+	// 主题是可选的页面覆盖层，通过 manifest.Pages 自行注册要接管的页面。
+	// 因此这里要做三件事：① 造主题服务并 seed；② 注册主题的 API；
+	// ③ 注册静态资源与页面分发（原 handleNoRoute 已被真正的分发取代）。
+	//
+	// 注意：路由注册代码放在 theme 包内（垂直切片），server.go 只负责
+	// 注入依赖与鉴权中间件。
+	themeSvc, err := theme.New(theme.Options{
+		ThemesDir: a.deps.Cfg.ThemesDir,
+		SeedFrom:  a.deps.Cfg.ThemeSeedFrom,
+		DB:        gdb,
+		Settings:  a.deps.Settings,
+		Log:       a.deps.Log,
+		Auditor:   themeAuditor{svc: auditSvc},
+	})
+	if err != nil {
+		return fmt.Errorf("初始化主题系统失败: %w", err)
+	}
+
+	// 首启 seed：主题目录为空时才写出内嵌默认主题（升级不覆盖用户主题，D94.4）。
+	// seed 失败不阻断启动 —— 运行时还有内嵌兜底，首页不会白屏。
+	if seeded, seedErr := themeSvc.Seed(); seedErr != nil {
+		a.deps.Log.Warn("主题目录 seed 失败（不影响启动，将使用内嵌兜底）", "err", seedErr)
+	} else if seeded {
+		a.deps.Log.Info("已从内嵌默认主题完成种子写入", "dir", a.deps.Cfg.ThemesDir)
+	}
+
+	// 公开站点信息（免鉴权，前端首屏调用一次）
+	themeSvc.RegisterSiteRoutes(api, theme.SiteRoutesOptions{Version: Version})
+
+	// 后台主题管理（全部需要 admin；必须改密的账号不得进入）
+	themeSvc.RegisterAdminRoutes(api, theme.AdminRoutesOptions{
+		Middlewares: []gin.HandlerFunc{
+			authMW.RequireAuth(),
+			authMW.RequirePasswordChanged(),
+			authMW.RequireAdmin(),
+		},
+	})
+
+	// ---- 静态资源与页面分发（D99）----
+	//
+	// 两个资源前缀必须严格分离：
+	//   /assets/**        永远属于**内置 SPA**（主题不得占用，否则会覆盖登录页与后台的资源）
+	//   /theme-assets/**  属于**当前主题**的 assets/（带路径穿越防护）
+	a.engine.GET("/assets/*filepath", webfs.ServeAssets())
+	themeSvc.RegisterAssetRoutes(a.engine)
+
+	// /themes/** 一律 404：不暴露主题目录、manifest.json 与主题源码（D99.2）。
+	// 必须显式注册，否则会被 NoRoute 当成页面而回退成 index.html。
+	a.engine.GET("/themes/*filepath", func(c *gin.Context) {
+		response.Fail(c, response.CodeNotFound)
+	})
+
+	// 未匹配的路径交给分发器：认证页/后台 → 内置 SPA；命中主题 Pages → 主题；
+	// 其余 → 内置 SPA（SPA 回退）。`/api/**` 仍未匹配则返回 40401 JSON。
+	a.engine.NoRoute(theme.ServePage(themeSvc))
 	return nil
+}
+
+// themeAuditor 把 *service.AuditService 适配成 theme.Auditor。
+//
+// 用适配器而不是让 theme 包 import service：主题模块不该依赖业务服务包，
+// 这样主题系统的编译与测试也能独立于业务层。
+type themeAuditor struct{ svc *service.AuditService }
+
+func (a themeAuditor) Log(ctx context.Context, e theme.AuditEntry) {
+	if a.svc == nil {
+		return
+	}
+	a.svc.Log(ctx, service.AuditEntry{
+		Type:       e.Type,
+		Status:     e.Status,
+		TargetType: e.TargetType,
+		TargetUID:  e.TargetUID,
+		Detail:     e.Detail,
+		Cause:      e.Cause,
+	})
 }
 
 // handleHealthz 是唯一不使用统一信封的端点（容器探针）。
@@ -168,21 +246,6 @@ func (a *App) handleSystemInfo(c *gin.Context) {
 		"ThemeActive":    a.deps.Settings.GetString("theme.active"),
 		"Uptime":         int64(time.Since(startedAt).Seconds()),
 	})
-}
-
-// handleNoRoute 处理未匹配路由。
-//
-// W9 会在这里做 SPA / 主题回退；当前阶段凡是 /api 前缀一律 404 JSON，
-// 其余路径返回 404 提示（尚未接入前端）。
-func (a *App) handleNoRoute(c *gin.Context) {
-	path := c.Request.URL.Path
-
-	if len(path) >= 4 && path[:4] == "/api" {
-		response.Fail(c, response.CodeNotFound)
-		return
-	}
-
-	response.FailMsg(c, response.CodeNotFound, "前端尚未接入（W9 将托管内置 SPA 与主题）")
 }
 
 var startedAt = time.Now()

@@ -20,8 +20,16 @@ import (
 //	原样透传、必须自己加引号 ：Where(原生字符串) / Select / Order / Exec / Raw
 //	GORM 自行加引号、传裸列名：Group(字符串) / struct|map 条件 / Updates|Delete(map)
 //
-// ⚠️ 特别注意 **Order 与 Group 相反**：GORM 只对 Group 的字符串加引号，
-// 对 Order 的字符串是原样透传，所以 Order 里也要用 col()。
+// ⚠️ 特别注意 **Order 与 Group 相反**：
+//   - `Order("X")`  原样透传 → 必须传 col("X")
+//   - `Group("X")`  GORM 自行加引号 → 必须传裸名 "X"（传 col() 会变成 """X"""）
+//
+// 这一对是最容易写错的地方，`identifier_quote_test.go` 有回归覆盖。
+//
+// ⚠️⚠️ **绝不能用 col() 当 Updates/Update 的列名**：
+// `Updates(map[string]any{col("X"): v})` 会让 GORM 再包一层引号，
+// 生成 `SET """X"""=v` → SQLite/PgSQL 报 no such column。
+// 更新时一律传**裸列名**：`Update("X", v)` / `Updates(map[string]any{"X": v})`。
 func col(name string) string { return `"` + name + `"` }
 
 // escapeLike 转义 LIKE 模式里的特殊字符（配合 `ESCAPE '\'` 使用）。

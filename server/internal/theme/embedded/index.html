@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PicGo-Web</title>
+<!--
+  内置默认主题（D94 的「永不白屏」兜底 + 首启 seed 源）。
+
+  特点：
+    · 单文件、内联 CSS/JS，**不依赖 assets/**，因此即使主题目录只被 seed 了一半也能渲染
+    · 数据全部来自 GET /api/web/v1/site/config（D95），不硬编码站点信息
+    · 只接管首页 `/`；其余页面走内置 SPA（Pages = ["/"]）
+
+  与 `make theme` 的关系：
+    `make theme` 会用 web/theme-default/ 构建出一份「完整版」默认主题覆盖到
+    <dataDir>/themes/default/。本文件是**兜底副本**，随二进制发布（go:embed），
+    在磁盘主题缺失/损坏时使用（OPERATIONS §8.7）。
+-->
+<style>
+  :root {
+    --bg: 0 0% 100%; --fg: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%; --muted-fg: 240 5.9% 45%;
+    --border: 240 5.9% 90%; --card: 0 0% 100%;
+    --brand: 211 100% 50%; --brand-fg: 0 0% 100%;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: 240 10% 3.9%; --fg: 0 0% 98%;
+      --muted: 240 3.7% 15.9%; --muted-fg: 240 5% 64.9%;
+      --border: 240 3.7% 15.9%; --card: 240 10% 3.9%;
+      --brand: 211 100% 52%;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: hsl(var(--bg)); color: hsl(var(--fg));
+    font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+
+  .hero { position: relative; min-height: 92vh; display: flex; align-items: center; overflow: hidden; }
+  .hero-bg { position: absolute; inset: 0; }
+  .hero-bg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hero-veil { position: absolute; inset: 0; background: hsl(var(--bg) / .72); backdrop-filter: blur(2px); }
+  .hero-inner { position: relative; width: 100%; max-width: 1120px; margin: 0 auto; padding: 48px 24px; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;
+           border: 1px solid hsl(var(--border)); background: hsl(var(--card) / .8); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 0 4px rgb(34 197 94 / .18); }
+  h1 { font-size: clamp(32px, 5vw, 52px); margin: 20px 0 12px; letter-spacing: -.02em; }
+  .sub { font-size: clamp(15px, 1.6vw, 18px); color: hsl(var(--muted-fg)); max-width: 34em; margin: 0 0 28px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+         padding: 12px 22px; border-radius: var(--radius); font-size: 15px; font-weight: 600;
+         text-decoration: none; border: 1px solid transparent; cursor: pointer; }
+  .btn-primary { background: hsl(var(--brand)); color: hsl(var(--brand-fg)); }
+  .btn-ghost { background: transparent; border-color: hsl(var(--border)); }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 64px 24px; }
+  .eyebrow { display: block; width: fit-content; margin: 0 auto 12px; padding: 5px 14px; border-radius: 999px;
+             background: hsl(var(--muted)); color: hsl(var(--muted-fg)); font-size: 13px; }
+  .h2 { text-align: center; font-size: clamp(24px, 3vw, 34px); margin: 0 0 8px; }
+  .h2-desc { text-align: center; color: hsl(var(--muted-fg)); margin: 0 auto 40px; max-width: 44em; }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+          padding: 22px; display: flex; gap: 14px; align-items: flex-start; }
+  .card-icon { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 10px; background: hsl(var(--muted));
+               display: grid; place-items: center; font-size: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: hsl(var(--muted-fg)); font-size: 14px; }
+
+  details.faq { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card));
+                padding: 16px 20px; margin-bottom: 12px; }
+  details.faq summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.faq summary::-webkit-details-marker { display: none; }
+  details.faq p { margin: 12px 0 0; color: hsl(var(--muted-fg)); font-size: 14px; }
+
+  .band { background: hsl(240 10% 8%); color: #fafafa; text-align: center; padding: 72px 24px; }
+  .band h2 { font-size: clamp(24px, 3vw, 34px); margin: 0 0 10px; }
+  .band p { color: rgb(250 250 250 / .7); margin: 0 0 26px; }
+  .band .btn-primary { background: #fafafa; color: hsl(240 10% 8%); }
+
+  footer { border-top: 1px solid hsl(var(--border)); padding: 28px 24px; text-align: center;
+           color: hsl(var(--muted-fg)); font-size: 13px; }
+  .notice { max-width: 1120px; margin: 0 auto; padding: 14px 24px 0; }
+  .notice div { border: 1px solid hsl(var(--border)); background: hsl(var(--muted));
+                border-radius: var(--radius); padding: 12px 16px; font-size: 14px; }
+  .skeleton { color: hsl(var(--muted-fg)); font-size: 14px; }
+  .hidden { display: none !important; }
+  code { background: hsl(var(--muted)); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+  @media (prefers-color-scheme: dark) {
+    #fallbackNote { border-color: #b45309 !important; background: #422006 !important; color: #fde68a !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <section class="hero">
+    <div class="hero-bg hidden" id="heroBg"><img id="heroImg" alt="" aria-hidden="true" /></div>
+    <div class="hero-veil"></div>
+    <div class="hero-inner">
+      <span class="badge"><span class="dot"></span> 服务状态</span>
+      <h1 id="heroTitle">PicGo-Web</h1>
+      <p class="sub" id="heroSub">在服务器上运行 PicGo，通过浏览器管理存储驱动、插件与图片。</p>
+      <div class="cta">
+        <a class="btn btn-primary" id="ctaPrimary" href="/login">立刻上传</a>
+        <a class="btn btn-ghost" href="#features">探索功能</a>
+        <a class="btn btn-ghost" href="/login">登录</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="notice hidden" id="fallbackWrap">
+    <div id="fallbackNote" style="border-color:#f59e0b;background:#fef3c7;color:#78350f"></div>
+  </div>
+
+  <div class="notice hidden" id="noticeWrap"><div id="notice"></div></div>
+
+  <section class="wrap" id="features">
+    <span class="eyebrow">为什么选择我们</span>
+    <h2 class="h2">核心能力</h2>
+    <p class="h2-desc" id="featuresDesc">自建图床控制台：把图片的存储与分发交给你自己的图床，其余交给我们。</p>
+    <div class="grid" id="featuresGrid"><p class="skeleton">加载中…</p></div>
+  </section>
+
+  <section class="wrap" id="scenarios">
+    <h2 class="h2">应用场景</h2>
+    <p class="h2-desc">自用为主，其次朋友 / 团队之间分享使用。</p>
+    <div class="grid" id="scenariosGrid"><p class="skeleton">加载中…</p></div>
+  </section>
+
+  <section class="wrap" id="faq">
+    <h2 class="h2">常见问题</h2>
+    <p class="h2-desc">关于图片存在哪、支持哪些图床、怎么控制容量。</p>
+    <div id="faqList"><p class="skeleton">加载中…</p></div>
+  </section>
+
+  <section class="band">
+    <h2>开始使用</h2>
+    <p>登录后即可配置存储驱动并上传第一张图片。</p>
+    <a class="btn btn-primary" href="/login">立刻上传</a>
+  </section>
+
+  <footer>
+    <div id="footerText">PicGo-Web</div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ESC[c]; });
+  }
+  function $(id) { return document.getElementById(id); }
+  function show(el) { if (el) el.classList.remove('hidden'); }
+  function setText(el, v) { if (el && v) el.textContent = v; }
+
+  // 内置图标名 → emoji（主题可以自由改用真正的图标库；这里只为不依赖任何外部资源）
+  var ICONS = {
+    server: '🗄️', puzzle: '🧩', list: '📋', folder: '🗂️', shield: '🛡️',
+    user: '👤', users: '👥', book: '📖', image: '🖼️', upload: '⬆️',
+    link: '🔗', chart: '📈', lock: '🔒', globe: '🌐', star: '⭐'
+  };
+  function icon(name) { return ICONS[String(name || '').toLowerCase()] || '✨'; }
+
+  function card(item) {
+    return '<article class="card">' +
+      '<div class="card-icon" aria-hidden="true">' + icon(item && item.Icon) + '</div>' +
+      '<div><h3>' + esc(item && item.Title) + '</h3><p>' + esc(item && item.Desc) + '</p></div>' +
+      '</article>';
+  }
+
+  function renderList(el, items, emptyHint) {
+    if (!el) return;
+    if (!Array.isArray(items) || items.length === 0) {
+      el.innerHTML = '<p class="skeleton">' + esc(emptyHint) + '</p>';
+      return;
+    }
+    el.innerHTML = items.map(card).join('');
+  }
+
+  function renderFaq(items) {
+    var el = $('faqList');
+    if (!el) return;
+    if (!Array.isArray(items) || items.length === 0) {
+      el.innerHTML = '<p class="skeleton">暂无常见问题。</p>';
+      return;
+    }
+    el.innerHTML = items.map(function (it) {
+      return '<details class="faq"><summary>' + esc(it && it.Question) + '</summary>' +
+        '<p>' + esc(it && it.Answer) + '</p></details>';
+    }).join('');
+  }
+
+  function applyConfig(cfg) {
+    var site = (cfg && cfg.Site) || {};
+    var theme = (cfg && cfg.Theme) || {};
+    var s = (theme && theme.Settings) || {};
+
+    var title = s.HomepageTitle || site.Name || 'PicGo-Web';
+    document.title = title;
+    setText($('heroTitle'), title);
+    setText($('heroSub'), s.HomepageDescription || site.Description || '');
+    setText($('featuresDesc'), site.Description || $('featuresDesc').textContent);
+
+    // 背景图：单一 URL，直接作为 <img src> 使用，**不做任何判断**（D97）
+    if (s.BackgroundURL) {
+      var img = $('heroImg');
+      img.addEventListener('error', function () { $('heroBg').classList.add('hidden'); });
+      img.src = s.BackgroundURL;
+      show($('heroBg'));
+    }
+
+    // 站点公告（纯文本展示，避免注入 HTML）
+    if (site.Notice) {
+      $('notice').textContent = site.Notice;
+      show($('noticeWrap'));
+    }
+
+    // 仅在「当前配置的主题不可用、已回退到本内置副本」时提示。
+    //
+    // 为什么不是写死一句「这是内置兜底首页」：本文件同时也是 themes/default/
+    // 的 seed 源，写死会让默认部署下每个用户都看到一条无意义的警告。
+    // 服务端在回退时会通过 ThemeError 告知（见 internal/theme 的 siteConfig 处理器）。
+    if (cfg && cfg.ThemeError) {
+      $('fallbackNote').textContent = '当前配置的主题不可用，已回退到内置默认首页。原因：' + cfg.ThemeError;
+      show($('fallbackWrap'));
+    }
+
+    if (s.ShowHomeFeatures === false) {
+      $('features').classList.add('hidden');
+    } else {
+      renderList($('featuresGrid'), s.HomepageFeatures, '尚未配置核心能力。');
+    }
+    renderList($('scenariosGrid'), s.HomepageScenarios, '尚未配置应用场景。');
+    renderFaq(s.HomepageFaq);
+
+    var footer = title;
+    if (site.Icp) footer += ' · ' + site.Icp;
+    footer += ' · v' + (site.Version || '');
+    setText($('footerText'), footer);
+  }
+
+  fetch('/api/web/v1/site/config', { credentials: 'omit', headers: { Accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+    .then(function (body) {
+      if (!body || body.Code !== 0) throw new Error((body && body.Message) || 'bad response');
+      applyConfig(body.Data);
+    })
+    .catch(function () {
+      // 兜底：接口不可用时也要给出一个可用的首页（说明「这是内置兜底首页」）
+      applyConfig({
+        Site: { Name: 'PicGo-Web', Description: '在服务器上运行 PicGo，通过浏览器管理存储驱动、插件与图片。', Version: '' },
+        Theme: { Settings: { ShowHomeFeatures: false } }
+      });
+      renderList($('scenariosGrid'), [], '无法读取站点配置，请检查后端是否可用。');
+      renderFaq([]);
+    });
+})();
+</script>
+</body>
+</html>

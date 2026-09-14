@@ -22,11 +22,11 @@ type User struct {
 	ID                 uint64 `gorm:"primaryKey;autoIncrement"`
 	UID                string `gorm:"size:32;uniqueIndex;not null"`
 	Email              string `gorm:"size:255;uniqueIndex;not null"`
-	PasswordHash       string `gorm:"size:255"`                        // bcrypt cost=12；纯 OAuth 用户为空
-	Role               string `gorm:"size:16;not null;default:user"`   // admin | user
+	PasswordHash       string `gorm:"size:255"`                              // bcrypt cost=12；纯 OAuth 用户为空
+	Role               string `gorm:"size:16;not null;default:user"`         // admin | user
 	Status             string `gorm:"size:16;index;not null;default:active"` // active | disabled
-	CapacityBytes      int64  `gorm:"not null;default:0"`              // 0 = 不限额（D20）
-	UsedBytes          int64  `gorm:"not null;default:0"`              // 当前持有的图片体积合计（D72）
+	CapacityBytes      int64  `gorm:"not null;default:0"`                    // 0 = 不限额（D20）
+	UsedBytes          int64  `gorm:"not null;default:0"`                    // 当前持有的图片体积合计（D72）
 	MustChangePassword bool   `gorm:"not null;default:false"`
 	LastLoginAt        int64  `gorm:"not null;default:0"`
 	Metadata           string `gorm:"type:text"` // JSON 扩展位
@@ -68,9 +68,9 @@ type OAuthIdentity struct {
 	ID             uint64 `gorm:"primaryKey;autoIncrement"`
 	UID            string `gorm:"size:32;uniqueIndex;not null"`
 	UserUID        string `gorm:"size:32;index;not null"`
-	Provider       string `gorm:"size:32;not null"`     // github
-	ProviderUserID string `gorm:"size:191;not null"`    // GitHub 数字 ID（稳定唯一标识，D28）
-	ProviderLogin  string `gorm:"size:191"`                                                 // GitHub username（仅展示）
+	Provider       string `gorm:"size:32;not null"`  // github
+	ProviderUserID string `gorm:"size:191;not null"` // GitHub 数字 ID（稳定唯一标识，D28）
+	ProviderLogin  string `gorm:"size:191"`          // GitHub username（仅展示）
 	ProviderEmail  string `gorm:"size:255"`
 	AvatarURL      string `gorm:"size:512"`
 	Metadata       string `gorm:"type:text"`

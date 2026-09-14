@@ -31,20 +31,20 @@ const (
 
 // 环境变量名（D81.3 第 2 条：环境变量保持 UPPER_SNAKE_CASE，不受 PascalCase 影响）。
 const (
-	EnvListen      = "PICGO_WEB_LISTEN"
-	EnvDataDir     = "PICGO_WEB_DATA_DIR"
-	EnvSecretKey   = "PICGO_WEB_SECRET_KEY"
-	EnvLogLevel    = "PICGO_WEB_LOG_LEVEL"
-	EnvTrustProxy  = "PICGO_WEB_TRUST_PROXY"
-	EnvAgentURL    = "PICGO_WEB_AGENT_URL"
-	EnvAgentToken  = "PICGO_WEB_AGENT_TOKEN"
-	EnvAgentAuto   = "PICGO_WEB_AGENT_AUTOSTART"
-	EnvAgentMock   = "PICGO_WEB_AGENT_MOCK"
-	EnvAllowPriv   = "PICGO_WEB_ALLOW_PRIVATE_FETCH"
-	EnvDevMode     = "PICGO_WEB_DEV"
-	EnvStaticDir   = "PICGO_WEB_STATIC_DIR"
-	EnvThemesDir   = "PICGO_WEB_THEMES_DIR"
-	EnvThemeSeed   = "PICGO_WEB_THEME_SEED"
+	EnvListen     = "PICGO_WEB_LISTEN"
+	EnvDataDir    = "PICGO_WEB_DATA_DIR"
+	EnvSecretKey  = "PICGO_WEB_SECRET_KEY"
+	EnvLogLevel   = "PICGO_WEB_LOG_LEVEL"
+	EnvTrustProxy = "PICGO_WEB_TRUST_PROXY"
+	EnvAgentURL   = "PICGO_WEB_AGENT_URL"
+	EnvAgentToken = "PICGO_WEB_AGENT_TOKEN"
+	EnvAgentAuto  = "PICGO_WEB_AGENT_AUTOSTART"
+	EnvAgentMock  = "PICGO_WEB_AGENT_MOCK"
+	EnvAllowPriv  = "PICGO_WEB_ALLOW_PRIVATE_FETCH"
+	EnvDevMode    = "PICGO_WEB_DEV"
+	EnvStaticDir  = "PICGO_WEB_STATIC_DIR"
+	EnvThemesDir  = "PICGO_WEB_THEMES_DIR"
+	EnvThemeSeed  = "PICGO_WEB_THEME_SEED"
 
 	EnvDBDriver = "PICGO_WEB_DB_DRIVER"
 	EnvDBDSN    = "PICGO_WEB_DB_DSN"
@@ -104,20 +104,20 @@ type Config struct {
 	SecretKey string // 为空则从 <DataDir>/secret.key 读取或生成
 
 	// 数据库
-	DBDriver           DBDriver
-	DBDSN              string // 非空时完全覆盖下面的拼装结果
-	DBAutoMigrate      bool
-	SQLitePath         string
-	PGHost             string
-	PGPort             int
-	PGUser             string
-	PGPassword         string
-	PGDBName           string
-	PGSSLMode          string
-	PGTimezone         string
-	DBMaxOpenConns     int
-	DBMaxIdleConns     int
-	DBConnMaxLifetime  time.Duration
+	DBDriver          DBDriver
+	DBDSN             string // 非空时完全覆盖下面的拼装结果
+	DBAutoMigrate     bool
+	SQLitePath        string
+	PGHost            string
+	PGPort            int
+	PGUser            string
+	PGPassword        string
+	PGDBName          string
+	PGSSLMode         string
+	PGTimezone        string
+	DBMaxOpenConns    int
+	DBMaxIdleConns    int
+	DBConnMaxLifetime time.Duration
 
 	// picgo-agent 侧车
 	AgentURL       string

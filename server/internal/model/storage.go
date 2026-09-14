@@ -9,9 +9,9 @@ package model
 // 都**不可能误带出密钥**。
 type StorageConfig struct {
 	ID              uint64 `gorm:"primaryKey;autoIncrement"`
-	UID             string `gorm:"size:32;uniqueIndex;not null"`                    // st_ 前缀的 ULID
-	Name            string `gorm:"size:64;index;not null"`                          // 展示名（全局唯一，应用层校验）
-	Type            string `gorm:"size:64;not null"`                            // 驱动类型：github / webdav / s3 / ...
+	UID             string `gorm:"size:32;uniqueIndex;not null"`     // st_ 前缀的 ULID
+	Name            string `gorm:"size:64;index;not null"`           // 展示名（全局唯一，应用层校验）
+	Type            string `gorm:"size:64;not null"`                 // 驱动类型：github / webdav / s3 / ...
 	PicgoConfigName string `gorm:"size:64;not null;default:Default"` // 映射 picgo _configName（D65）
 	Enabled         bool   `gorm:"not null;default:true"`
 	IsDefault       bool   `gorm:"not null;default:false"` // 全局同时只有一条为 true
@@ -48,11 +48,11 @@ func (StorageSecret) TableName() string { return "StorageSecrets" }
 // theme.active 不在此表 —— 它是站点级选择，存 SystemSettings。
 type ThemeConfig struct {
 	ID        uint64 `gorm:"primaryKey;autoIncrement"`
-	ThemeID   string `gorm:"size:64;not null"`   // 主题 ID（如 default）
-	Key       string `gorm:"size:128;not null"` // 配置项名（如 BackgroundURL）
-	Value     string `gorm:"type:text"`                                      // JSON 编码的值
-	ValueType string `gorm:"size:16;not null;default:string"`                // 与 manifest 的 Type 对应
-	UpdatedBy string `gorm:"size:32"`                                        // 操作者 UserUID
+	ThemeID   string `gorm:"size:64;not null"`                // 主题 ID（如 default）
+	Key       string `gorm:"size:128;not null"`               // 配置项名（如 BackgroundURL）
+	Value     string `gorm:"type:text"`                       // JSON 编码的值
+	ValueType string `gorm:"size:16;not null;default:string"` // 与 manifest 的 Type 对应
+	UpdatedBy string `gorm:"size:32"`                         // 操作者 UserUID
 	CreatedAt int64  `gorm:"not null"`
 	UpdatedAt int64  `gorm:"not null"`
 }
