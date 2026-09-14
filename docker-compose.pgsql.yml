@@ -1,0 +1,50 @@
+# PostgreSQL 覆盖文件
+#
+# 用法（与主 compose 合并）：
+#   docker compose -f docker-compose.yml -f docker-compose.pgsql.yml up -d
+#
+# 前置：在 .env 里设置以下变量（本文件会把它们传给 picgo-web 容器）
+#   PICGO_WEB_DB_DRIVER=postgres
+#   PICGO_WEB_PG_PASSWORD=<强密码>
+#   PICGO_WEB_PG_DBNAME=picgo_web
+#   PICGO_WEB_PG_USER=picgo
+#   PICGO_WEB_PG_SSLMODE=disable      # 同容器网络内可 disable；跨主机请用 require 及以上
+
+services:
+  picgo-web:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PICGO_WEB_DB_DRIVER: "postgres"
+      # 容器内用服务名访问 PG
+      PICGO_WEB_PG_HOST: "postgres"
+      PICGO_WEB_PG_PORT: "5432"
+      PICGO_WEB_PG_USER: "picgo"
+      PICGO_WEB_PG_DBNAME: "picgo_web"
+      PICGO_WEB_PG_SSLMODE: "disable"
+      PICGO_WEB_PG_TIMEZONE: "Asia/Shanghai"
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: picgo-web-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "picgo"
+      POSTGRES_DB: "picgo_web"
+      # 密码从 .env 读取（不要在这里明文写）
+      POSTGRES_PASSWORD: "${PICGO_WEB_PG_PASSWORD:?请在 .env 中设置 PICGO_WEB_PG_PASSWORD}"
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U picgo -d picgo_web"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

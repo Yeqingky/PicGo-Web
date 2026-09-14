@@ -1,0 +1,44 @@
+# ---- 运行时数据（绝不提交）----
+data/
+*.db
+*.db-shm
+*.db-wal
+secret.key
+agent-token.txt
+initial-admin-password.txt
+
+# ---- 构建产物 ----
+server/picgo-web
+server/bin/
+picgo-agent/dist/
+picgo-agent/node_modules/
+web/dist/
+web/node_modules/
+themes/
+
+# ---- 环境 ----
+.env
+.env.local
+.env.*.local
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# ---- 日志 ----
+*.log
+logs/
+
+# ---- Go ----
+*.test
+coverage.out
+
+# ---- Node ----
+.pnpm-store/
+*.tsbuildinfo
+.eslintcache
