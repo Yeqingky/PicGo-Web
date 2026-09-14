@@ -1,0 +1,5 @@
+# pnpm 12 默认拦截依赖的构建脚本；不显式允许 esbuild 时
+# `pnpm install` 会以 ERR_PNPM_IGNORED_BUILDS 失败。
+# esbuild 由 vite 传递依赖引入，必须允许其 postinstall。
+allowBuilds:
+  esbuild: true

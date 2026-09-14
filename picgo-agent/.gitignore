@@ -1,0 +1,15 @@
+# ---- 依赖与产物 ----
+node_modules/
+dist/
+
+# ---- 运行期（agent 默认在项目根 data/ 下写 picgo 配置，见 env.ts）----
+data/
+
+# ---- 日志 ----
+*.log
+
+# ---- 编辑器 ----
+.DS_Store
+.idea/
+*.swp
+*~

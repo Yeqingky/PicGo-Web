@@ -1,0 +1,34 @@
+{
+  "name": "picgo-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PicGo-Web \u4fa7\u8f66\uff1a\u6301\u6709 picgo-core \u5b9e\u4f8b\uff0c\u5bf9\u5916\u63d0\u4f9b\u4ec5\u5185\u7f51\u53ef\u8bbf\u95ee\u7684 HTTP \u5951\u7ea6\uff08docs/API.md \u00a713\uff09",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.7",
+    "hono": "^4.11.3",
+    "picgo": "file:../../PicGo-Core"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "globals": "^17.12.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -14,9 +14,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/YeqingKy/PicGo-Web/server/internal/auth"
 	"github.com/YeqingKy/PicGo-Web/server/internal/config"
 	"github.com/YeqingKy/PicGo-Web/server/internal/database"
+	"github.com/YeqingKy/PicGo-Web/server/internal/handler"
 	"github.com/YeqingKy/PicGo-Web/server/internal/middleware"
+	"github.com/YeqingKy/PicGo-Web/server/internal/repository"
+	"github.com/YeqingKy/PicGo-Web/server/internal/response"
+	"github.com/YeqingKy/PicGo-Web/server/internal/service"
 	"github.com/YeqingKy/PicGo-Web/server/internal/settings"
 )
 
@@ -25,13 +30,19 @@ const Version = "0.1.0"
 
 // Deps 是 HTTP 层需要的依赖集合。
 //
-// 后续工作流（W3/W5）会往这里加 auth / service 等字段；
+// 后续工作流（W5）会往这里加 agent 客户端等字段；
 // 加字段不改变 Run 的签名，便于逐步扩展。
 type Deps struct {
 	Cfg      *config.Config
 	Log      *slog.Logger
 	DB       *database.DB
 	Settings *settings.Service
+
+	// SigningKey 是加密主密钥（D19）。
+	//
+	// 用于派生 JWT 签名密钥与 OAuth state 签名密钥，
+	// **不另存 secret**：主密钥是唯一秘密源，轮换它即轮换所有派生密钥。
+	SigningKey []byte
 }
 
 // App 持有 HTTP 服务与装配好的路由。
@@ -70,34 +81,71 @@ func New(deps Deps) (*App, error) {
 	)
 
 	app := &App{deps: deps, engine: engine}
-	app.registerRoutes()
+	if err := app.registerRoutes(); err != nil {
+		return nil, err
+	}
 	return app, nil
 }
 
 // Engine 暴露 gin 引擎（供 W3 继续注册路由与测试使用）。
 func (a *App) Engine() *gin.Engine { return a.engine }
 
-// registerRoutes 注册 W2 阶段的**最小**路由集。
-//
-// 完整业务路由由 W3（鉴权/用户）、W5（存储/上传/图库）、W9（Lsky/静态托管）
-// 陆续挂载；本阶段只保证：
-//   - GET /healthz                    容器与前端探针（**免鉴权、无信封**）
-//   - GET /api/web/v1/system/info     版本与运行信息
+// registerRoutes 装配依赖并注册路由。
 //
 // 路由前缀约定（D80）：
-//   - /api/web/v1/**  PicGo-Web 内部 API
-//   - /api/v1/**      Lsky 兼容层（W9 注册，本阶段**不得**占用）
-func (a *App) registerRoutes() {
-	// 健康检查：**不使用信封、字段小写**（供容器/K8s 探针直接解析，D 说明见 API.md）
+//   - `/api/web/v1/**`  PicGo-Web 内部 API
+//   - `/api/v1/**`      Lsky 兼容层（W9 注册，**本包不得占用**）
+//   - `/healthz`        健康检查（无信封、字段小写，供容器探针）
+//
+// 依赖的装配（repository → service → handler → middleware）放在这里，
+// 这样部署入口 main.go 只需构造基础依赖（config/db/settings/key）。
+func (a *App) registerRoutes() error {
+	if len(a.deps.SigningKey) == 0 {
+		return errors.New("server: Deps.SigningKey 为空，无法派生 JWT / OAuth state 签名密钥")
+	}
+
+	gdb := a.deps.DB.DB
+
+	// ---- 数据访问层 ----
+	userRepo := repository.NewUserRepo(gdb)
+	tokenRepo := repository.NewTokenRepo(gdb)
+	attemptRepo := repository.NewLoginAttemptRepo(gdb)
+	logRepo := repository.NewLogRepo(gdb)
+
+	// ---- 密码学原语 ----
+	jwtMgr := auth.NewJWTManager(a.deps.SigningKey)
+	stateSigner := auth.NewStateSigner(a.deps.SigningKey)
+
+	// ---- 业务服务层 ----
+	auditSvc := service.NewAuditService(logRepo, a.deps.Log)
+	tokenSvc := service.NewTokenService(a.deps.Settings, userRepo, tokenRepo, jwtMgr, auditSvc, a.deps.Log)
+	userSvc := service.NewUserService(a.deps.Settings, userRepo, tokenRepo, attemptRepo, auditSvc, a.deps.Log)
+	oauthSvc := service.NewOAuthService(a.deps.Settings, userRepo, stateSigner, auditSvc, a.deps.Log)
+
+	// ---- 鉴权中间件 ----
+	authMW := middleware.NewAuth(userRepo, tokenRepo, jwtMgr, a.deps.Log)
+
+	// ---- 健康检查（不使用信封、字段小写）----
 	a.engine.GET("/healthz", a.handleHealthz)
 
 	api := a.engine.Group("/api/web/v1")
-	{
-		api.GET("/system/info", a.handleSystemInfo)
-	}
+	api.GET("/system/info", a.handleSystemInfo)
+
+	// ---- 认证 / OAuth / API Token ----
+	handler.NewAuthHandler(tokenSvc, userSvc, a.deps.Settings, a.deps.Log).Register(api, authMW)
+	handler.NewOAuthHandler(oauthSvc, tokenSvc, a.deps.Cfg, a.deps.Log).Register(api, authMW)
+
+	// ---- 用户管理（全部要求 admin；且必须改密的账号不得进入，D32）----
+	usersGroup := api.Group("/users",
+		authMW.RequireAuth(),
+		authMW.RequirePasswordChanged(),
+		authMW.RequireAdmin(),
+	)
+	handler.NewUserHandler(userSvc, a.deps.Log).Register(usersGroup)
 
 	// 未匹配的 /api/** 一律返回 JSON 404（不参与 SPA 回退）
 	a.engine.NoRoute(a.handleNoRoute)
+	return nil
 }
 
 // handleHealthz 是唯一不使用统一信封的端点（容器探针）。
@@ -112,17 +160,13 @@ func (a *App) handleHealthz(c *gin.Context) {
 
 // handleSystemInfo 返回版本与运行信息。
 func (a *App) handleSystemInfo(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"Code":    0,
-		"Message": "ok",
-		"Data": gin.H{
-			"Version":       Version,
-			"SchemaVersion": database.SchemaVersion,
-			"DatabaseDriver": string(a.deps.DB.Driver),
-			"SiteName":      a.deps.Settings.GetString("site.name"),
-			"ThemeActive":   a.deps.Settings.GetString("theme.active"),
-			"Uptime":        int64(time.Since(startedAt).Seconds()),
-		},
+	response.OK(c, gin.H{
+		"Version":        Version,
+		"SchemaVersion":  database.SchemaVersion,
+		"DatabaseDriver": string(a.deps.DB.Driver),
+		"SiteName":       a.deps.Settings.GetString("site.name"),
+		"ThemeActive":    a.deps.Settings.GetString("theme.active"),
+		"Uptime":         int64(time.Since(startedAt).Seconds()),
 	})
 }
 
@@ -134,19 +178,11 @@ func (a *App) handleNoRoute(c *gin.Context) {
 	path := c.Request.URL.Path
 
 	if len(path) >= 4 && path[:4] == "/api" {
-		c.JSON(http.StatusNotFound, gin.H{
-			"Code":    int(40401),
-			"Message": "接口不存在",
-			"Data":    nil,
-		})
+		response.Fail(c, response.CodeNotFound)
 		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{
-		"Code":    int(40401),
-		"Message": "前端尚未接入（W9 将托管内置 SPA 与主题）",
-		"Data":    gin.H{"Path": path},
-	})
+	response.FailMsg(c, response.CodeNotFound, "前端尚未接入（W9 将托管内置 SPA 与主题）")
 }
 
 var startedAt = time.Now()

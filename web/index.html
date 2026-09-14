@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      版本占位：服务端在注入 index.html 时可用站点信息替换（见 docs/API.md §10.1）。
+      默认值与站点的回退值保持一致。
+    -->
+    <title>PicGo Web</title>
+    <meta name="description" content="在服务器上运行 PicGo，通过浏览器管理存储驱动、插件与图片" />
+    <script>
+      // 首屏防闪烁（DESIGN.md §11）：在样式加载前根据 localStorage 决定 html.dark。
+      // 必须内联且尽早执行，否则暗色主题会先闪一下亮色。
+      //
+      // ⚠️ 两个坑（都由真实浏览器验证发现，改动前请先看 src/store/ui-store.ts）：
+      //   1. key 是 zustand persist 的 name（`picgo-web.ui`），**不是** `picgo-web.ui.theme`
+      //   2. 值是 JSON（{state:{theme},version}），**不是**裸字符串 'dark'
+      //    任一搞错都会让本脚本永远落入 'system' 分支 → 暗色用户每次加载闪一下亮色。
+      (function () {
+        try {
+          var mode = 'system'
+          var raw = localStorage.getItem('picgo-web.ui')
+          if (raw) {
+            var value = raw
+            // 优先按 zustand persist 的 JSON 结构解析
+            try {
+              var parsed = JSON.parse(raw)
+              if (parsed && parsed.state && typeof parsed.state.theme === 'string') {
+                value = parsed.state.theme
+              }
+            } catch (e) {
+              /* 不是 JSON（例如被手工写成裸字符串）→ 按原样处理 */
+            }
+            if (value === 'light' || value === 'dark' || value === 'system') mode = value
+          }
+
+          var prefersDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          var dark = mode === 'dark' || (mode === 'system' && prefersDark)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* localStorage 不可用时按亮色渲染即可，不阻塞页面 */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

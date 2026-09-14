@@ -1,0 +1,80 @@
+/*
+ * 设计 token —— 逐字对应 docs/DESIGN.md §2.1
+ *
+ * 采用 shadcn/ui neutral（zinc）调色板，HSL 三元组形式（不含 hsl()），
+ * 由 globals.css 的 @theme 映射成 Tailwind 主题类。
+ *
+ * ⚠️ 禁止硬编码颜色：组件一律使用语义类（bg-background / text-muted-foreground /
+ *    border-border …），不要写 #fff 或 hsl(...) 字面量（DESIGN.md §2.1 使用规则）。
+ */
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 5.9% 64.9%;
+
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+
+  --destructive: 0 72.2% 50.6%;
+  --destructive-foreground: 0 0% 98%;
+
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+
+  /* 强调色（来自参考主题，Apple Blue） */
+  --brand: 211 100% 50%; /* #007AFF */
+  --brand-foreground: 0 0% 100%;
+
+  /* 语义色（用于状态点、日志状态、任务状态） */
+  --success: 142 71% 45%;
+  --warning: 38 92% 50%;
+  --info: 199 89% 48%;
+
+  --radius: 0.5rem; /* 8px —— 卡片/按钮基准圆角 */
+  --radius-sm: 0.375rem; /* 6px */
+  --radius-lg: 0.75rem; /* 12px —— 输入框/大卡片 */
+  --radius-full: 9999px;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+  --brand: 211 100% 52%;
+  --brand-foreground: 0 0% 100%;
+  --success: 142 71% 45%;
+  --warning: 38 92% 50%;
+  --info: 199 89% 48%;
+}

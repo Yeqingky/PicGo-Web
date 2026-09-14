@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/YeqingKy/PicGo-Web/server/internal/auth"
 	"github.com/YeqingKy/PicGo-Web/server/internal/config"
 	"github.com/YeqingKy/PicGo-Web/server/internal/crypto"
 	"github.com/YeqingKy/PicGo-Web/server/internal/database"
@@ -99,7 +100,16 @@ func run() error {
 		}
 	}
 
-	// ---- 7. 配置服务 ----
+	// ---- 7. 首启引导：表里没有用户时创建一个初始管理员（D32）----
+	//
+	// 必须在 HTTP 服务启动前完成，否则系统里没有任何账号可登录。
+	// 内部幂等：已有用户时直接返回（重复启动不会重建）。
+	userRepo := repository.NewUserRepo(db.DB)
+	if err := auth.Bootstrap(userRepo, cfg, log); err != nil {
+		return fmt.Errorf("首启引导失败: %w", err)
+	}
+
+	// ---- 8. 配置服务 ----
 	settingRepo := repository.NewSettingRepo(db.DB)
 	settingsSvc, err := settings.New(settingRepo, cipher, log)
 	if err != nil {
@@ -114,12 +124,13 @@ func run() error {
 		)
 	})
 
-	// ---- 8. HTTP 服务 ----
+	// ---- 9. HTTP 服务 ----
 	app, err := server.New(server.Deps{
-		Cfg:      cfg,
-		Log:      log,
-		DB:       db,
-		Settings: settingsSvc,
+		Cfg:        cfg,
+		Log:        log,
+		DB:         db,
+		Settings:   settingsSvc,
+		SigningKey: key,
 	})
 	if err != nil {
 		return fmt.Errorf("装配 HTTP 服务失败: %w", err)
