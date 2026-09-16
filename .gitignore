@@ -40,6 +40,16 @@ Thumbs.db
 *.log
 logs/
 
+# 前端源码目录名与运行时目录重名，必须显式保留源码。
+!web/src/components/themes/
+!web/src/components/themes/**
+!web/src/features/admin/logs/
+!web/src/features/admin/logs/**
+!web/src/features/admin/themes/
+!web/src/features/admin/themes/**
+!web/src/features/logs/
+!web/src/features/logs/**
+
 # ---- Go ----
 *.test
 coverage.out
