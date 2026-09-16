@@ -61,14 +61,16 @@ func NewAgentJobProjector(jobs *repository.JobRepo, ag agent.Client, log *slog.L
 // Run 恢复孤儿任务并持续消费 Hub 事件 + 周期对账，直到 ctx 取消或 Hub 关闭。
 // 应在独立 goroutine 中调用。
 func (p *AgentJobProjector) Run(ctx context.Context, hub *events.Hub) {
-	p.recoverOrphaned()
-
+	// 先订阅再恢复孤儿任务：恢复期间 agent 仍可能发布 job 事件，
+	// 不能让启动阶段的事件落在订阅建立之前而丢失。
 	var ch <-chan events.Event
 	var cancel context.CancelFunc
 	if hub != nil {
 		ch, cancel = hub.Subscribe("", true) // 系统订阅者：接收全部事件
 		defer cancel()
 	}
+
+	p.recoverOrphaned()
 
 	interval := p.reconcileEvery
 	if interval == 0 {
