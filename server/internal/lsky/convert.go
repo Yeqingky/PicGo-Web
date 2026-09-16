@@ -104,25 +104,11 @@ func derivePathname(v *service.UploadView) string {
 	return firstNonEmpty(v.FileName, v.OriginalName)
 }
 
-// toAlbumData 把内部相册视图转成 lsky 表示。
-func toAlbumData(v *service.AlbumView) AlbumData {
-	if v == nil {
-		return AlbumData{}
-	}
-	return AlbumData{
-		ID:        v.UID,
-		Name:      v.Name,
-		Intro:     v.Intro,
-		ImageNum:  v.ImageCount,
-		CreatedAt: formatTime(v.CreatedAt),
-		UpdatedAt: formatTime(v.UpdatedAt),
-	}
-}
-
 // toProfileData 组装用户资料。
 //
 // 字节与 KB 两套字段都给（见 dto.go ProfileData 的说明）。
-func toProfileData(u *model.User, nickname string, imageNum, albumNum int64) ProfileData {
+// AlbumNum 恒为 0：本项目已移除相册功能，仅保留契约字段。
+func toProfileData(u *model.User, nickname string, imageNum int64) ProfileData {
 	kb := func(b int64) int64 {
 		if b <= 0 {
 			return 0
@@ -140,7 +126,7 @@ func toProfileData(u *model.User, nickname string, imageNum, albumNum int64) Pro
 		CapacityBytes: u.CapacityBytes,
 		UsedBytes:     u.UsedBytes,
 		ImageNum:      imageNum,
-		AlbumNum:      albumNum,
+		AlbumNum:      0,
 
 		Capacity:    kb(u.CapacityBytes),
 		UseCapacity: kb(u.UsedBytes),

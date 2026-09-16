@@ -2,20 +2,25 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 
 	"github.com/YeqingKy/PicGo-Web/server/internal/agent"
 	"github.com/YeqingKy/PicGo-Web/server/internal/events"
 	"github.com/YeqingKy/PicGo-Web/server/internal/model"
+	"github.com/YeqingKy/PicGo-Web/server/internal/repository"
 	"github.com/YeqingKy/PicGo-Web/server/internal/response"
 )
 
 // PluginService 管理 picgo 插件（安装 / 卸载 / 更新 / 启停）。
 //
 // 真相源是 **agent 侧的 node_modules**（不是数据库）：插件是 npm 包，
-// 装没装、什么版本，只有读盘才知道。因此本服务**不落库**，
-// 只做「转发 + 审计 + 事件广播」。
+// 装没装、什么版本，只有读盘才知道。因此列表/启停**不落库**。
+// 但安装/卸载/更新是异步任务：agent 只持有执行期状态（内存），
+// 前端任务面板查的是 Go 的 `Jobs` 表（docs/API.md §8），所以这里
+// 必须在拿到 agent 返回的 JobUID 后同步建一条 `Jobs` 记录；
+// 后续状态与日志由 `AgentJobProjector` 消费 agent 事件落库。
 //
 // ⚠️ **插件 = 服务器上的任意代码**：安装/卸载都要求 admin，
 // 且每一步都写审计日志（D45 的 plugin.* 类型）。
@@ -24,11 +29,12 @@ type PluginService struct {
 	agent agent.Client
 	hub   *events.Hub
 	audit *AuditService
+	jobs  *repository.JobRepo
 }
 
 // NewPluginService 构造。
-func NewPluginService(log *slog.Logger, ag agent.Client, hub *events.Hub, audit *AuditService) *PluginService {
-	return &PluginService{log: log, agent: ag, hub: hub, audit: audit}
+func NewPluginService(log *slog.Logger, ag agent.Client, hub *events.Hub, audit *AuditService, jobs *repository.JobRepo) *PluginService {
+	return &PluginService{log: log, agent: ag, hub: hub, audit: audit, jobs: jobs}
 }
 
 // PluginView 是对外的插件对象。
@@ -146,6 +152,11 @@ func (s *PluginService) pluginAction(ctx context.Context, action string, names [
 		return nil, fromAgent(err)
 	}
 
+	// 任务记创建失败不阻断主流程：安装本身照常进行，只是任务面板少一条记录
+	if err := s.createJobRecord(jobUID, action, names, by); err != nil && s.log != nil {
+		s.log.Warn("插件任务记录创建失败（不影响安装本身）", "job", jobUID, "err", err)
+	}
+
 	s.audit.Log(ctx, AuditEntry{
 		Type: pluginLogType(action), Status: model.LogStatusSuccess,
 		UserUID: by, TargetType: "plugin", TargetUID: jobUID,
@@ -162,6 +173,45 @@ func (s *PluginService) pluginAction(ctx context.Context, action string, names [
 	}
 
 	return &PluginJobResult{JobUID: jobUID, Notice: notice}, nil
+}
+
+// createJobRecord 在 Go 的 Jobs 表创建插件任务记录。
+//
+// UID 直接用 agent 返回的 jobUID（同一任务在两边的身份必须一致，
+// 否则前端任务详情查不到）；agent 收到请求即把 job 置为 running，
+// 因此这里直接落 running 而非 queued。
+func (s *PluginService) createJobRecord(jobUID, action string, names []string, by string) error {
+	if s.jobs == nil {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{"Names": names, "Action": action})
+	if err != nil {
+		return err
+	}
+	now := model.Now()
+	job := &model.Job{
+		UID:        jobUID,
+		Kind:       pluginJobKind(action),
+		Status:     model.JobStatusRunning,
+		UserUID:    by,
+		TotalItems: len(names),
+		Payload:    string(payload),
+		CreatedAt:  now,
+		StartedAt:  now,
+	}
+	return s.jobs.CreateWithItems(job, nil)
+}
+
+// pluginJobKind 把插件操作映射为 job Kind。
+func pluginJobKind(action string) string {
+	switch action {
+	case pluginActionInstall:
+		return model.JobKindPluginInstall
+	case pluginActionUninstall:
+		return model.JobKindPluginUninstall
+	default:
+		return model.JobKindPluginUpdate
+	}
 }
 
 // SetEnabled 启用/禁用插件。

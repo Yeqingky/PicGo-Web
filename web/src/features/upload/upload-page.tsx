@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useAlbums, useStorageConfigs } from '@/hooks/api'
+import { useStorageConfigs } from '@/hooks/api'
 import { t } from '@/i18n'
 import { flushUploadQueue, useUploadStore } from '@/store/upload-store'
 
@@ -36,13 +36,10 @@ export function UploadPage() {
     defaultConfig,
     error: storageError,
   } = useStorageConfigs()
-  const { albums } = useAlbums()
 
   const items = useUploadStore((state) => state.items)
   const targetStorageUID = useUploadStore((state) => state.targetStorageUID)
-  const targetAlbumUID = useUploadStore((state) => state.targetAlbumUID)
   const setTargetStorage = useUploadStore((state) => state.setTargetStorage)
-  const setTargetAlbum = useUploadStore((state) => state.setTargetAlbum)
   const addFiles = useUploadStore((state) => state.addFiles)
   const removeItem = useUploadStore((state) => state.removeItem)
   const retryItem = useUploadStore((state) => state.retryItem)
@@ -114,8 +111,8 @@ export function UploadPage() {
           <UploadDropzone onFiles={addFiles} />
         )}
 
-        {/* 目标存储 / 相册 */}
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* 目标存储 */}
+        <div className="max-w-md">
           <div className="space-y-1.5">
             <Label htmlFor="target-storage">{t('UPLOAD_TARGET_STORAGE')}</Label>
             <Select
@@ -140,27 +137,6 @@ export function UploadPage() {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">{t('UPLOAD_STORAGE_SWITCH_HINT')}</p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="target-album">{t('UPLOAD_TARGET_ALBUM')}</Label>
-            <Select
-              value={targetAlbumUID || '__none__'}
-              onValueChange={(value) => setTargetAlbum(value === '__none__' ? '' : value)}
-            >
-              <SelectTrigger id="target-album">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">{t('UPLOAD_ALBUM_NONE')}</SelectItem>
-                {albums.map((album) => (
-                  <SelectItem key={album.UID} value={album.UID}>
-                    {album.Name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">{t('UPLOAD_ALBUM_HINT')}</p>
           </div>
         </div>
 

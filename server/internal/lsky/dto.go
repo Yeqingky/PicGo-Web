@@ -105,17 +105,3 @@ type ImageData struct {
 	CreatedAt string `json:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
-
-// ---------------------------------------------------------------------------
-// 相册
-// ---------------------------------------------------------------------------
-
-// AlbumData 是相册表示。
-type AlbumData struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Intro     string `json:"intro"`
-	ImageNum  int64  `json:"image_num"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-}

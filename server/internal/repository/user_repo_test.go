@@ -153,7 +153,7 @@ func TestCountByUserGroupQueries(t *testing.T) {
 		}
 	}
 
-	// usr_a 有 2 张图、1 个相册；usr_b 有 1 张图、0 个相册
+	// usr_a 有 2 张图；usr_b 有 1 张图
 	uploads := []struct {
 		uid, user string
 		size      int64
@@ -171,12 +171,6 @@ func TestCountByUserGroupQueries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := repo.db.Create(&model.Album{
-		UID: "al_1", UserUID: "usr_a", Name: "默认", CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-
 	counts, err := repo.CountUploadsByUser([]string{"usr_a", "usr_b"})
 	if err != nil {
 		t.Fatalf("统计图片数失败: %v", err)
@@ -189,17 +183,6 @@ func TestCountByUserGroupQueries(t *testing.T) {
 	}
 	if _, ok := counts["usr_c"]; ok {
 		t.Error("没有图片的用户不应出现在结果里")
-	}
-
-	albums, err := repo.CountAlbumsByUser([]string{"usr_a", "usr_b"})
-	if err != nil {
-		t.Fatalf("统计相册数失败: %v", err)
-	}
-	if albums["usr_a"] != 1 {
-		t.Errorf("usr_a 应有 1 个相册，实际 %d", albums["usr_a"])
-	}
-	if albums["usr_b"] != 0 {
-		t.Errorf("usr_b 应有 0 个相册，实际 %d", albums["usr_b"])
 	}
 
 	// 空入参不应发起查询、也不应报错

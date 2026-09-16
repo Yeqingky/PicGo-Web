@@ -147,12 +147,15 @@ type Capabilities struct {
 	SupportsPathTemplate bool `json:"SupportsPathTemplate"`
 	// SupportsRemoteDelete 该驱动是否支持远端删除（D47：靠插件实现 remove 事件）。
 	SupportsRemoteDelete bool `json:"SupportsRemoteDelete"`
+	// ServerRenames 该图床是否无视传入文件名、由服务端自行命名（如 NodeImage）。
+	// picgo 协议不声明此项；由上传结果运行时对比回写（初始 false，探测到即置 true）。
+	ServerRenames bool `json:"ServerRenames"`
 	// ConfigFields 该驱动声明的配置字段名（**驱动原生名**）。
 	ConfigFields []string `json:"ConfigFields"`
 	// PathFieldNames 命中的路径类字段名（推断 SupportsPathTemplate 的依据）。
 	PathFieldNames []string `json:"PathFieldNames"`
-	DetectedAt     int64    `json:"DetectedAt"`
-	PicgoVersion   string   `json:"PicgoVersion"`
+	DetectedAt   int64  `json:"DetectedAt"`
+	PicgoVersion string `json:"PicgoVersion"`
 }
 
 // UploaderInfo 是一个可用的上传器（图床驱动）。
@@ -209,6 +212,9 @@ type TestUploaderData struct {
 	Message   string `json:"Message"`
 	LatencyMs int64  `json:"LatencyMs"`
 	Detail    string `json:"Detail,omitempty"`
+	// FileName 实际发送的文件名（魔法钩子处理后的 fileName）。
+	// 供「服务端改名」探测：与 Detail（返回 URL）的文件名对比。
+	FileName string `json:"FileName,omitempty"`
 }
 
 // TransformersData 是 `GET /api/transformers` 的响应。

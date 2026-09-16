@@ -4,7 +4,7 @@
 
 PicGo-Web 把桌面端 [PicGo](https://github.com/Molunerfinn/PicGo) 的能力搬到服务器：
 后端负责账号、配额、队列、元数据与审计，而**图片的存储与分发完全由 PicGo 内核（`picgo-core`）及其插件承担**。
-因此你可以在浏览器里配置图床、装插件、批量上传、整理相册、拷贝外链，
+因此你可以在浏览器里配置图床、装插件、批量上传、拷贝外链，
 而图片本身照旧落在你自己的 GitHub / S3 / WebDAV / 七牛 / 阿里云 OSS 等图床上，由你完全掌控。
 
 > 定位：**自用为主，其次朋友 / 团队之间分享使用。** 不是商业化图床服务。
@@ -20,7 +20,7 @@ PicGo-Web 把桌面端 [PicGo](https://github.com/Molunerfinn/PicGo) 的能力�
 | **插件管理** | 搜索 / 安装 / 卸载 / 更新 / 启停 PicGo 插件，安装过程实时输出日志 |
 | **后端上传队列** | 队列 + 并发限制 + 失败重试 + 单文件超时 + 优雅关闭 + 重启恢复；进度经 SSE 实时推送 |
 | **魔法路径 / 魔法文件名** | 每个存储配置**独立**配置命名模板（`{Y}{m}{d}{md5-8}{uniqid}...`），驱动是否支持自定义路径由能力探测决定 |
-| **图库与整理** | 相册、重命名、批量操作、按驱动/相册/状态筛选；一键复制外链（Markdown / 直链 / HTML） |
+| **图库与整理** | 重命名、批量操作、按驱动/状态筛选；一键复制外链（Markdown / 直链 / HTML） |
 | **管理员视图隔离** | 「我的图片」与「全部用户的图片」在同一页面用顶部 Tab 切换，避免误操作他人图片 |
 | **操作日志与邮件日志** | 统一审计日志（按类型 / 状态 / 关键词过滤与搜索，默认保留 180 天并自动清理）+ 独立的邮件发送记录（不存邮件正文） |
 | **远端删除** | 删除图片时可选同步删除图床上的文件 —— **仅当该驱动的插件实现了 `remove` 事件时才生效**，否则只删本地记录并标记 |
@@ -49,7 +49,7 @@ cd PicGo-Web
 ```
 
 > **为什么是 clone 而不是只下 `docker-compose.yml`**：
-> compose 里带 `build: context: .`，镜像由仓库内的 `deploy/docker/Dockerfile`
+> compose 里带 `build: context: .`，镜像由仓库根目录的 `Dockerfile`
 > 多阶段构建（前端 → 侧车 → Go → 运行时）。只下单个 compose 文件会缺构建上下文。
 >
 > 如果将来发布官方镜像到 registry，也可以只下 compose + `.env` 并注释掉 `build:` 一段，
@@ -223,12 +223,10 @@ PicGo-Web/
 ├── web/                        # React 前端（Vite + Tailwind + Radix + Zustand）
 ├── docs/                       # 开发文档集（索引见 docs/README.md）
 ├── scripts/                    # 端到端验证脚本（e2e-*.sh / smoke-auth.sh）
-├── deploy/docker/
-│   ├── Dockerfile              # 生产镜像（四阶段：前端 → 侧车 → Go → 运行时）
-│   └── Dockerfile.dev          # 开发镜像（三个 target：agent-dev / server-dev / web-dev / e2e）
+├── Dockerfile                  # 生产镜像（四阶段：前端 → 侧车 → Go → 运行时）
 ├── docker-compose.yml          # 生产（SQLite）
 ├── docker-compose.pgsql.yml    # 生产 · PostgreSQL 覆盖
-├── docker-compose-dev.yml      # 开发（三容器 + 热重载）
+├── docker-compose-dev.yml      # 开发（三容器 + 热重载；直接用基础镜像，无 dev Dockerfile）
 ├── Makefile
 └── .env.example
 ```
@@ -273,8 +271,10 @@ cat data-dev/initial-admin-password.txt
 | `make dev-build` | 改了依赖后重建镜像 |
 
 > **数据目录**：开发用 `./data-dev/`（与生产的 `./data/` 隔离）。
-> `node_modules` 与 Go 模块缓存放在**具名卷**里，容器内安装、容器内使用 ——
+> 全部用**宿主目录挂载**（bind mount，不用存储卷）：`node_modules` 与 Go 模块缓存
+> 放在 `./data-dev/` 下的独立子目录里，容器内安装、容器内使用 ——
 > 避免宿主（Linux/WSL）与容器（Alpine）的平台差异导致的二进制不兼容。
+> dev 容器以 root 运行，无需手工 chown；`make dev-up` 会自动创建全部挂载目录。
 
 **两个可选开关**（通过环境变量传给 compose）：
 
@@ -443,7 +443,7 @@ make e2e-lsky       # Lsky v1 兼容层（9 端点 + 信封一致性）
 |---|---|
 | [`docs/DECISIONS.md`](./docs/DECISIONS.md) | **决策记录（最高约束）** —— 改动前必读 |
 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 架构总览、目录结构、扩展点、安全清单 |
-| [`docs/DATA-MODEL.md`](./docs/DATA-MODEL.md) | 表结构唯一真源（21 张表）与配置键位表 |
+| [`docs/DATA-MODEL.md`](./docs/DATA-MODEL.md) | 表结构唯一真源（20 张表）与配置键位表 |
 | [`docs/API.md`](./docs/API.md) | 接口契约唯一真源（REST + SSE + Lsky + agent） |
 | [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) | 运行机制：队列、配额、限流、日志、邮件、删除 |
 | [`docs/PICGO-INTEGRATION.md`](./docs/PICGO-INTEGRATION.md) | picgo-core 集成、魔法路径、补丁清单 |
@@ -526,7 +526,7 @@ data/themes/<主题ID>/
 
 **换了主题会影响图库 / 后台吗？**
 
-不会。**默认只有首页会变**。图库、上传、相册、任务、日志、设置、后台、登录页全部是内置界面，
+不会。**默认只有首页会变**。图库、上传、任务、日志、设置、后台、登录页全部是内置界面，
 与主题无关。
 
 主题可以在 `manifest.json` 里用 `Pages` 声明接管更多页面（例如 `["/", "/gallery"]`），
@@ -593,13 +593,26 @@ SQLite 对 ASCII 大小写不敏感，两种写法都能跑，所以这个问题
 
 本项目以 **MIT License** 发布，见 [LICENSE](./LICENSE)。
 
-致谢（以下项目为本项目提供了能力基础或设计参考，本项目与它们均无隶属关系）：
+### 相关仓库
+
+本项目由三个仓库协作组成：
+
+| 仓库 | 说明 |
+|---|---|
+| [YeqingKy/PicGo-Web](https://github.com/YeqingKy/PicGo-Web) | 主仓库（本仓库）：Go 后端 + Node 侧车 + Web 前端 |
+| [YeqingKy/PicGo-Core](https://github.com/YeqingKy/PicGo-Core) | 自维护的 picgo-core fork（`PicGo-Web` 分支），npm 包 [`@yeqingky/picgo-core`](https://www.npmjs.com/package/@yeqingky/picgo-core)；含按次指定图床、事件归属等增量补丁，详见其 `FORK-NOTES.md` |
+| [YeqingKy/PicGo-Web-Theme](https://github.com/YeqingKy/PicGo-Web-Theme) | 官方默认主题（首页落地页）源码；启动 seed 优先从此仓库拉取（D100），内嵌兑底副本由 `make theme-sync` 同步 |
+
+### 致谢
+
+以下项目为本项目提供了能力基础或设计参考，本项目与它们均无隶属关系：
 
 | 项目 | 说明 |
 |---|---|
 | [PicGo](https://github.com/Molunerfinn/PicGo) | 桌面端实现。本项目的**运维形态、插件事件约定**（如 `remove` 事件）与魔法文件名实现思路均参考其主进程代码 |
 | [PicGo-Core](https://github.com/PicGo/PicGo-Core) | **核心依赖**。本项目通过 Node 侧车宿主它，上传、多配置图床、插件安装与配置表单 schema 全部由它提供；本项目在其 `PicGo-Web` 分支上维护了一小组增量改动 |
-| [lsky-pro（兰空图床）](https://github.com/lsky-org/lsky-pro) | 功能骨架参考：用户/配额/相册/上传限制的组织方式；并提供 **Lsky API v1 兼容契约**的来源 |
+| [PicList](https://github.com/Kuingsmile/PicList) | 设计参考：**按图床粒度的重命名/处理能力**、能力探测与降级提示的交互方式（如「服务端命名」图床的提示策略）；其 [PicList-Core](https://github.com/Kuingsmile/PicList-Core) 的分层方式亦有借鉴 |
+| [lsky-pro（兰空图床）](https://github.com/lsky-org/lsky-pro) | 功能骨架参考：用户/配额/上传限制的组织方式；并提供 **Lsky API v1 兼容契约**的来源 |
 | [skyImage](https://github.com/nxtcorex/skyImage) | 工程实践参考：Go + React 的分层与安装向导、Lsky 兼容层的落地方式、前后端技术栈选型 |
 
 三份不适用声明：

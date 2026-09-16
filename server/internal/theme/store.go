@@ -99,11 +99,12 @@ type ScanResult struct {
 //
 // 它是**无状态**的（目录内容即真相源），因此每次请求都能拿到最新状态。
 type Store struct {
-	themesDir        string
-	seedFrom         string
+	themesDir       string
+	seedFrom        string
+	defaultGitURL   string
 	maxManifestBytes int64
-	log              *slog.Logger
-	auditor          Auditor
+	log             *slog.Logger
+	auditor         Auditor
 }
 
 // StoreOptions 构造 Store 的依赖。
@@ -112,9 +113,14 @@ type StoreOptions struct {
 	ThemesDir string
 	// SeedFrom 可选的 seed 源目录（`PICGO_WEB_THEME_SEED`）。
 	//
-	// 为空时使用随二进制内嵌的默认主题；非空时从该目录复制
-	// （让部署方把 `make theme` 产出的完整版默认主题种进去）。
+	// 为空时先尝试 DefaultGitURL（Git 拉取），再回退随二进制内嵌的默认主题；
+	// 非空时优先从该目录复制
+	// （让部署方把完整版默认主题种进去）。
 	SeedFrom string
+	// DefaultGitURL 默认主题的 Git 源（`theme.defaultGitURL`，D100）。
+	//
+	// 为空表示禁用 Git seed（只用内嵌副本）；克隆失败自动回退内嵌。
+	DefaultGitURL string
 	// MaxManifestBytes manifest.json 大小上限（theme.maxManifestBytes）。
 	MaxManifestBytes int64
 	Log              *slog.Logger
@@ -134,6 +140,7 @@ func NewStore(opts StoreOptions) *Store {
 	return &Store{
 		themesDir:        opts.ThemesDir,
 		seedFrom:         strings.TrimSpace(opts.SeedFrom),
+		defaultGitURL:    strings.TrimSpace(opts.DefaultGitURL),
 		maxManifestBytes: maxBytes,
 		log:              log,
 		auditor:          ensureNoop(opts.Auditor),
@@ -148,20 +155,68 @@ func (s *Store) DirOf(id string) string { return filepath.Join(s.themesDir, id) 
 
 // Seed 在主题目录为空时写出默认主题（D94.4 / OPERATIONS §8.3）。
 //
-// seed 源优先用 SeedFrom（`PICGO_WEB_THEME_SEED`），否则用内嵌副本。
+// seed 源优先级（D100）：
+//
+//  1. SeedFrom（`PICGO_WEB_THEME_SEED` 指定的本机目录）
+//  2. DefaultGitURL（`theme.defaultGitURL`，从 Git 仓库拉取；失败回退下一条）
+//  3. 内嵌副本（编译期随二进制发布，最后兑底；离线部署 / Git 不可达时用它）
+//
+// Git 源失败不阻断 seed：这是离线部署的正常环境差异，回落内嵌即可。
 func (s *Store) Seed() (bool, error) {
-	seeded, err := seedIfEmpty(s.themesDir, s.seedFrom)
+	seeded, source, err := s.seed()
 	if err != nil {
 		return false, err
 	}
 	if seeded {
-		source := "内嵌默认主题"
-		if s.seedFrom != "" {
-			source = s.seedFrom
-		}
 		s.log.Info("已完成默认主题的种子写入", "dir", s.DirOf(embeddedDefaultID), "source", source)
 	}
 	return seeded, nil
+}
+
+// seed 是 Seed 的实现体，返回（是否写入、来源描述、错误）。
+func (s *Store) seed() (bool, string, error) {
+	themesDir := s.themesDir
+	if err := os.MkdirAll(themesDir, 0o755); err != nil {
+		return false, "", fmt.Errorf("创建主题目录 %s 失败: %w", themesDir, err)
+	}
+
+	empty, err := dirHasNoSubdir(themesDir)
+	if err != nil {
+		return false, "", err
+	}
+	if !empty {
+		return false, "", nil
+	}
+
+	target := filepath.Join(themesDir, embeddedDefaultID)
+
+	// ① 显式 seed 源目录（部署侧完全控制内容）
+	if src := strings.TrimSpace(s.seedFrom); src != "" {
+		if dirExists(src) {
+			if err := copyThemeDir(src, target); err != nil {
+				return false, "", fmt.Errorf("从 %s 复制默认主题失败: %w", src, err)
+			}
+			return true, "seed 源目录 " + src, nil
+		}
+		// 配置了但不存在：不静默忽略，明确告知（否则运维会以为生效了）
+		return false, "", fmt.Errorf("seed 源目录不存在: %s", src)
+	}
+
+	// ② Git 源（D100：默认主题经 Git 通道导入；失败回退内嵌）
+	if gitURL := strings.TrimSpace(s.defaultGitURL); gitURL != "" {
+		if err := seedFromGit(gitURL, target); err != nil {
+			s.log.Warn("从 Git 拉取默认主题失败，回退内嵌副本",
+				"url", gitURL, "err", err)
+		} else {
+			return true, "Git 源 " + gitURL, nil
+		}
+	}
+
+	// ③ 内嵌副本
+	if err := writeEmbeddedTheme(target); err != nil {
+		return false, "", err
+	}
+	return true, "内嵌默认主题", nil
 }
 
 // Scan 扫描主题目录。

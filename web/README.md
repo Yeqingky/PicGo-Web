@@ -11,7 +11,7 @@ React 19 + TypeScript 5.9 + Vite 7 + Tailwind CSS v4 + Radix UI + React Router 7
 | 由**本包**（内置 SPA）渲染 | 由**主题**渲染（不在本包） |
 |---|---|
 | `/login`、`/first-login`、`/forgot-password`、`/reset-password` | `/`（首页） |
-| `/upload`、`/gallery`、`/albums`、`/jobs`、`/logs`、`/settings` | （默认主题只注册首页；将来可注册更多页面） |
+| `/upload`、`/gallery`、`/albums`、`/jobs`、`/settings` | （默认主题只注册首页；将来可注册更多页面） |
 | `/admin/**`（users / storage / plugins / themes / site / logs） | |
 
 两条边界（`docs/DECISIONS.md` D94 / D99.2、`docs/DESIGN.md` §9.5）：
@@ -109,7 +109,7 @@ src/
 ├── hooks/api/                        服务端状态 hooks（useAsync / usePaged + 各域）
 ├── components/
 │   ├── ui/                           30 个 shadcn 风格基础件（Radix + Tailwind）
-│   ├── layout/                       AppShell / Sidebar / Topbar / UserMenu / QuotaBar /
+│   ├── layout/                       AppShell / Sidebar / SidebarFooter / Topbar / UserMenu / QuotaBar /
 │   │                                  ThemeToggle / 命令面板（⌘K）/ 路由守卫 / 403 / 404
 │   ├── common/                       PageHeader / LinkCopyMenu / ConfirmDialog / JsonView / 状态徽章
 │   ├── gallery/                      ImageCard / ImageGrid / ImageList / Lightbox / 整理对话框
@@ -164,8 +164,9 @@ picgo 侧字段与驱动配置字段名（`picgoPlugins` / `repo` / `token` / `p
 
 - `baseURL = /api/web/v1`；响应体是统一信封 `{Code, Message, Data}`。
 - 拦截器**自动把 `Code === 0` 的 `Data` 拆出来**，`Code !== 0` 抛 `ApiError`。
-- `40102` / `40103` → **单飞（single-flight）静默刷新**一次并重放原请求；
+- HTTP 401 或 `40102` / `40103` → **单飞（single-flight）静默刷新**一次并重放原请求；
   失败则清登录态，由 `RequireAuth` 声明式跳登录页（不做命令式 `window.location`）。
+- SSE 断线重连前先请求 `/auth/me`，让过期的 `pcw_at` 通过 `pcw_rt` 刷新，避免重启后 SSE 只拿过期 access token 无限重试。
 
 ### i18n（D75）
 
@@ -204,14 +205,14 @@ picgo 侧字段与驱动配置字段名（`picgoPlugins` / `repo` / `token` / `p
 | `/gallery/:UID` | 大图 + 元数据 + 外链 + 重命名 / 移动 / 删除 |
 | `/albums` | 相册卡片（封面 + 计数）+ 新建/编辑/删除；有图片时删除被拒并提示 |
 | `/jobs` | 表格 + 进度；行点击开**日志抽屉**（SSE 实时 + `AfterSeq` 增量补齐）；清理已完成 |
-| `/logs`、`/admin/logs` | 类型/状态/关键词筛选；详情抽屉（格式化 JSON）；管理员多「邮件日志」Tab（**不显示正文**，D29） |
+| `/admin/logs` | 管理员查看全站操作日志；类型/状态/关键词筛选；详情抽屉；多「邮件日志」Tab（**不显示正文**，D29） |
 | `/admin/storage` | 卡片列表 + 能力徽章；新建/编辑抽屉（**动态表单** + **魔法路径变量可点击插入**）；密钥遮蔽、未改动不提交；连通性测试；`PicgoConfigName` 只读 |
 | `/admin/plugins` | 已安装 / 浏览（npm 搜索）双 Tab；`GuiOnly` 徽章 + 提示；异步操作 → 任务日志抽屉；**内核重启提示 + 轮询 `/healthz`** |
 | `/admin/themes` | 主题卡片（**展示 `Pages` 接管范围**、`Valid=false` 红色错误卡）；zip 上传（失败时逐条展示校验原因）；设置抽屉（复用 schema 渲染器 + `Source` 徽章）；卸载约束与危险区 |
 | `/admin/site` | 站点信息 / 邮件（含测试发信）/ 登录方式 / 安全 / 日志 / 高级 / 关于；每项 `Source` 徽章；OAuth 回调地址一键复制 |
 | `/admin/users` | 列表 + 新建/编辑 + 重置密码（明文只显示一次）+ 注销；**删除自己 / 最后一个管理员被禁用** |
 | `/settings` | 账号信息、改密码、GitHub 绑定/解绑、API Token（明文只显示一次）、主题偏好 |
-| 全局 | **命令面板 `⌘K`**、SSE 断线提示、明暗主题、a11y（焦点环 / `aria-label` / 语义 alt） |
+| 全局 | **命令面板 `⌘K`**、侧栏底部 SSE 在线 / 离线状态、明暗主题、a11y（焦点环 / `aria-label` / 语义 alt） |
 
 ---
 

@@ -1,18 +1,22 @@
 # PicGo-Web 开发环境（唯一开发方式）
 #
-# 设计目标：**一条命令起全套开发环境**，与生产用同一套镜像定义
-# （只是把前端换成 Vite dev server、后端/侧车用源码 + 热重载）。
+# 设计目标：**一条命令起全套开发环境**，直接使用官方基础镜像跑源码
+# （**没有 dev Dockerfile** —— 不构建任何开发镜像）。
 #
 #   make dev            # = docker compose -f docker-compose-dev.yml up
-#   make dev-build      # 改了依赖后重新构建
+#   make dev-up         # 后台启动（会自动创建全部挂载目录）
 #   make dev-logs       # 跟踪日志
 #   make dev-down       # 停止
 #
-# 与生产 compose 的差异：
-#   · 源码以**挂载卷**方式进容器（改代码即热重载，不用重新 build 镜像）
-#   · 前端跑 Vite dev server（HMR），而不是构建静态产物
-#   · Go 用 `go run`（air 风格的重启由 go run 自身完成；如需自动重载可加 air）
-#   · 数据目录用 `./data-dev`，与生产的 `./data` **隔离**，避免互相污染
+# 工作方式：
+#   · 源码以**挂载目录**方式进容器（改代码即热重载，改依赖改 package.json 即可）
+#   · 依赖在**容器启动时自动安装**（pnpm install；Go 依赖由 go run 自动拉取）
+#   · 全部用**宿主目录挂载**（bind mount），**不用存储卷（named volume）**：
+#       node_modules / Go 模块与构建缓存 / corepack 缓存都放 ./data-dev/ 下的子目录，
+#       保证「容器内安装、容器内使用」且重启/重建后可复用。
+#     权限说明：dev 容器内进程以 **root** 运行，目录缺失时 docker 会自动创建
+#       （root 属主），**无需手工 chown**；`make dev-up` 也会预先 mkdir 好全部目录。
+#   · 生产环境的镜像构建见根目录 `Dockerfile` + `docker-compose.yml`
 #
 # 端口：
 #   5173  前端（Vite dev server，/api 代理到 8080）
@@ -23,25 +27,35 @@ name: picgo-web-dev
 
 services:
   # ---------------------------------------------------------------------------
-  # picgo-agent：Node 侧车（持有 picgo-core 实例）
+  # picgo-agent：Node 侧车（持有 picgo-core 实例）—— 基础镜像 + tsx watch
   # ---------------------------------------------------------------------------
   agent:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.dev
-      target: agent-dev
+    image: node:24-alpine
     container_name: picgo-web-dev-agent
     restart: unless-stopped
     working_dir: /app/picgo-agent
+    # 启动流程：启用 corepack(pnpm) → 按清单装依赖 → 循环拉起 agent
+    # ⚠️ 不能用 `tsx watch`：agent 在插件装卸后会主动 process.exit(0)，
+    #    watch 模式只会「等待文件变更」而不退出（node --watch 同样如此），
+    #    容器就永远不会重启，端口从此无人监听。
+    #    这里用 shell 循环模拟生产环境 Go Supervisor 的「退出即拉起」语义。
+    #    代价：改 TS 源码不会自动重载，需 `docker restart picgo-web-dev-agent`。
+    # curl：部分插件上传器会 shell out 到 curl（如 picgo-plugin-nodeimage）
+    command: sh -c "apk add --no-cache curl >/dev/null && corepack enable && pnpm install --frozen-lockfile=false && while true; do pnpm exec tsx src/index.ts; echo \"[dev] picgo-agent exited (code=$$?), 2s 后重启...\"; sleep 2; done"
     volumes:
       # 源码挂载：改 TS 即由 tsx watch 热重载
       - ./picgo-agent:/app/picgo-agent
-      # node_modules 用**具名卷**而不是宿主目录：
-      #   宿主的 node_modules 是 Linux/WSL 本地装的，直接挂进去会与容器内的
-      #   平台特定二进制（esbuild 等）冲突。具名卷保证「容器内安装、容器内使用」。
-      - agent_node_modules:/app/picgo-agent/node_modules
-      # picgo 的 baseDir（config.json + node_modules 里的插件）
-      - ./data-dev/picgo:/data/picgo
+      # ⚠️ node_modules 用**宿主独立目录**，不直接用源码树里的 node_modules：
+      #   宿主（Linux/WSL）本地装的 node_modules 含平台特定二进制（esbuild 等），
+      #   直接挂进容器会冲突。用 ./data-dev 下的子目录隔离，容器内装、容器内用。
+      #   容器以 root 运行，无需 chown（docker 会自动创建缺失目录）。
+      - ./data-dev/picgo-agent/node_modules:/app/picgo-agent/node_modules
+      # corepack 下载的 pnpm 本体缓存（避免每次重建容器重新下载）
+      - ./data-dev/corepack:/root/.cache/node/corepack
+      # ⚠️ 与 server 完全同一 /data 视图：生产是单容器共享 /data，
+      #   dev 双容器必须显式对齐 —— 否则 agent 看不到 /data/uploads
+      #   （上传暂存目录），所有真实上传都会报「文件不存在」。
+      - ./data-dev:/data
     environment:
       PICGO_AGENT_HOST: "0.0.0.0"
       PICGO_AGENT_PORT: "36678"
@@ -56,32 +70,37 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 15s
+      # 首次启动含依赖安装，给足时间
+      start_period: 60s
     networks: [devnet]
 
   # ---------------------------------------------------------------------------
-  # server：Go 后端（源码挂载，go run 启动）
+  # server：Go 后端 —— 基础镜像 + go run（源码挂载）
   # ---------------------------------------------------------------------------
   server:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.dev
-      target: server-dev
+    image: golang:1.25-alpine
     container_name: picgo-web-dev-server
     restart: unless-stopped
     working_dir: /app/server
+    # tzdata：日志时区需要；go run 自己解析依赖（模块缓存在挂载目录里）
+    command: sh -c "apk add --no-cache tzdata git >/dev/null && go run ./cmd/picgo-web"
     depends_on:
       agent:
         condition: service_healthy
     volumes:
       - ./server:/app/server
-      - go_pkg_mod:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      # ⚠️ Go 模块与构建缓存：宿主目录挂载（不用存储卷）；容器以 root 运行，无需 chown
+      - ./data-dev/go/mod:/go/pkg/mod
+      - ./data-dev/go/build-cache:/root/.cache/go-build
       - ./data-dev:/data
       # 前端源码挂载（只读）：server 的热重载不需要它，但便于在容器内跑
       # `make build-web` 验证 embed 接线
       - ./web:/app/web:ro
     environment:
+      # 纯 Go：SQLite 用 glebarez/sqlite、PgSQL 用 pgx，都不需要 CGO
+      CGO_ENABLED: "0"
+      GOFLAGS: "-mod=mod"
+      GOTOOLCHAIN: "local"
       PICGO_WEB_LISTEN: "0.0.0.0:8080"
       PICGO_WEB_DATA_DIR: "/data"
       PICGO_WEB_DB_DRIVER: "sqlite"
@@ -102,19 +121,21 @@ services:
     networks: [devnet]
 
   # ---------------------------------------------------------------------------
-  # web：Vite dev server（HMR）
+  # web：Vite dev server（HMR）—— 基础镜像 + vite
   # ---------------------------------------------------------------------------
   web:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.dev
-      target: web-dev
+    image: node:24-alpine
     container_name: picgo-web-dev-web
     restart: unless-stopped
     working_dir: /app/web
+    # 启动流程：启用 corepack(pnpm) → 按清单装依赖 → vite dev server
+    # --host 0.0.0.0：容器外才能访问；Vite 默认只绑 127.0.0.1
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile=false && pnpm dev --host 0.0.0.0"
     volumes:
       - ./web:/app/web
-      - web_node_modules:/app/web/node_modules
+      # ⚠️ 同 agent：node_modules 用宿主独立目录，容器内装、容器内用；root 运行无需 chown
+      - ./data-dev/web/node_modules:/app/web/node_modules
+      - ./data-dev/corepack:/root/.cache/node/corepack
     environment:
       # Vite 代理目标指向 compose 内的 server 服务
       VITE_API_PROXY_TARGET: "http://server:8080"
@@ -132,39 +153,55 @@ services:
   # 跑法（Makefile 已封装为 make e2e-*）：
   #   docker compose -f docker-compose-dev.yml run --rm --no-deps e2e ./scripts/e2e-lsky.sh
   #
+  # 直接用 golang 基础镜像：entrypoint 负责一次性装齐 e2e 脚本需要的工具
+  # （bash / curl / python3 / node / npm / pnpm）再 exec 真正的命令，
+  # 因此 `run e2e <脚本>` 的用法不受影响。
+  #
   # 用独立的端口（18080 / 36679 / 39003），与 dev 环境（8080/36678/5173）不冲突，
   # 因此两者可以同时跑。
   e2e:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.dev
-      target: e2e
+    image: golang:1.25-alpine
     profiles: ["e2e"]
     working_dir: /app
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache bash curl python3 nodejs npm git >/dev/null
+        # Alpine 仓库的 nodejs 不再捆绑 corepack（Node 24+ 移除）；
+        # corepack 不可用时回退到 npm 全局安装 pnpm
+        if command -v corepack >/dev/null 2>&1; then
+          corepack enable
+          corepack prepare pnpm@latest --activate
+        else
+          npm install -g pnpm >/dev/null
+        fi
+        # 脚本由卷挂载而来，兜底补执行位
+        chmod +x /app/scripts/*.sh 2>/dev/null || true
+        exec "$$@"
+      - e2e
+    command: ["bash"]
     volumes:
       - ./server:/app/server
       - ./picgo-agent:/app/picgo-agent
       - ./web:/app/web
       - ./scripts:/app/scripts:ro
-      - e2e_agent_modules:/app/picgo-agent/node_modules
-      - e2e_web_modules:/app/web/node_modules
-      - go_pkg_mod:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      # e2e 的依赖目录与 dev 隔离（两套 node_modules 可同时存在）
+      - ./data-dev/e2e/picgo-agent/node_modules:/app/picgo-agent/node_modules
+      - ./data-dev/e2e/web/node_modules:/app/web/node_modules
+      - ./data-dev/corepack:/root/.cache/node/corepack
+      - ./data-dev/go/mod:/go/pkg/mod
+      - ./data-dev/go/build-cache:/root/.cache/go-build
     environment:
       WORK: /tmp/e2e
       LISTEN_PORT: "18080"
       AGENT_PORT: "36679"
       MOCK_BED_PORT: "39003"
+      CGO_ENABLED: "0"
+      GOFLAGS: "-mod=mod"
+      GOTOOLCHAIN: "local"
       TZ: "Asia/Shanghai"
     networks: [devnet]
-
-volumes:
-  agent_node_modules:
-  web_node_modules:
-  go_pkg_mod:
-  go_build_cache:
-  e2e_agent_modules:
-  e2e_web_modules:
 
 networks:
   devnet:

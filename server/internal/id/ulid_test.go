@@ -30,7 +30,6 @@ func TestWithPrefixAndHelpers(t *testing.T) {
 	}{
 		{"Upload", Upload(), PrefixUpload},
 		{"Storage", Storage(), PrefixStorage},
-		{"Album", Album(), PrefixAlbum},
 		{"Job", Job(), PrefixJob},
 		{"User", User(), PrefixUser},
 		{"APIToken", APIToken(), PrefixAPIToken},

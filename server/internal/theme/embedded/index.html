@@ -35,6 +35,10 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
   body {
     background: hsl(var(--bg)); color: hsl(var(--fg));
     font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
@@ -42,7 +46,7 @@
   }
   a { color: inherit; }
 
-  .hero { position: relative; min-height: 92vh; display: flex; align-items: center; overflow: hidden; }
+  .hero { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
   .hero-bg { position: absolute; inset: 0; }
   .hero-bg img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .hero-veil { position: absolute; inset: 0; background: hsl(var(--bg) / .72); backdrop-filter: blur(2px); }

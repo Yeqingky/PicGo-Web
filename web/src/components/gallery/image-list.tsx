@@ -18,7 +18,7 @@ import type { Upload } from '@/types/api'
 /**
  * 图库列表视图（DESIGN.md §5.2）。
  *
- * 表格列 = 文件名 / 大小 / 尺寸 / 存储 / 相册 / 状态 / 时间 / 操作。
+ * 表格列 = 文件名 / 大小 / 尺寸 / 存储 / 状态 / 时间 / 操作。
  * 管理员在「全部图片」Tab 下额外有「上传者」列（DESIGN.md §10）。
  */
 export interface ImageListProps {
@@ -26,13 +26,11 @@ export interface ImageListProps {
   selectedUIDs: string[]
   showUploader?: boolean
   storageNames?: Record<string, string>
-  albumNames?: Record<string, string>
   onToggleSelect: (uid: string) => void
   onSelect: (uid: string, shiftKey: boolean) => void
   onOpen: (uid: string) => void
   onEdit: (upload: Upload) => void
   onDelete: (upload: Upload) => void
-  onMove: (upload: Upload) => void
 }
 
 export function ImageList({
@@ -40,13 +38,11 @@ export function ImageList({
   selectedUIDs,
   showUploader = false,
   storageNames = {},
-  albumNames = {},
   onToggleSelect,
   onSelect,
   onOpen,
   onEdit,
   onDelete,
-  onMove,
 }: ImageListProps) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -59,7 +55,6 @@ export function ImageList({
             <TableHead>{t('GALLERY_COL_SIZE')}</TableHead>
             <TableHead>{t('GALLERY_COL_DIMENSIONS')}</TableHead>
             <TableHead>{t('GALLERY_COL_STORAGE')}</TableHead>
-            <TableHead>{t('GALLERY_COL_ALBUM')}</TableHead>
             <TableHead>{t('GALLERY_COL_STATUS')}</TableHead>
             <TableHead>{t('GALLERY_COL_CREATED')}</TableHead>
             <TableHead className="w-12" />
@@ -114,9 +109,6 @@ export function ImageList({
                 <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                   {upload.StorageName || storageNames[upload.StorageUID] || upload.StorageUID || '—'}
                 </TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                  {upload.AlbumUID ? (albumNames[upload.AlbumUID] ?? '—') : t('GALLERY_NO_ALBUM')}
-                </TableCell>
                 <TableCell>
                   <StatusBadge status={upload.Status} />
                 </TableCell>
@@ -133,10 +125,7 @@ export function ImageList({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onSelect={() => onEdit(upload)}>
-                        {t('COMMON_EDIT')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => onMove(upload)}>
-                        {t('GALLERY_MOVE_TO_ALBUM')}
+                        {t('GALLERY_RENAME_TITLE')}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-destructive focus:text-destructive"

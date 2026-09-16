@@ -146,6 +146,7 @@ export function uploaderRoutes(ctx: AppContext): Hono {
           {
             SupportsPathTemplate: false,
             SupportsRemoteDelete: false,
+            ServerRenames: false,
             ConfigFields: [],
             PathFieldNames: [],
             DetectedAt: nowSeconds(),
@@ -262,7 +263,8 @@ export function uploaderRoutes(ctx: AppContext): Hono {
         Ok: true,
         Message: `连通正常（测试文件已上传${uploadedURL !== '' ? `：${uploadedURL}` : ''}）`,
         LatencyMs: latency,
-        Detail: uploadedURL
+        Detail: uploadedURL,
+        FileName: outcome.data?.FileName ?? path.basename(tmpFile)
       }
       return ok(c, data)
     } catch (error) {

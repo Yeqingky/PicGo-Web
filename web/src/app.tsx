@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { useLocale } from '@/i18n'
 import { router } from '@/router'
 import { useAuthStore } from '@/store/auth-store'
 
@@ -17,6 +18,7 @@ import { useAuthStore } from '@/store/auth-store'
  *  4. `Toaster`：Toast 容器（不受路由影响，放在最外层）
  */
 export function App() {
+  const locale = useLocale()
   const bootstrap = useAuthStore((state) => state.bootstrap)
 
   // 登录态探测放在**应用级**，而不是 AppShell 里：
@@ -33,7 +35,7 @@ export function App() {
   return (
     <ThemeProvider>
       <TooltipProvider delayDuration={300}>
-        <RouterProvider router={router} />
+        <RouterProvider key={locale} router={router} />
         <Toaster />
       </TooltipProvider>
     </ThemeProvider>

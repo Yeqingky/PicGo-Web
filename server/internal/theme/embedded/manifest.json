@@ -6,14 +6,16 @@
     "en": "Default Theme"
   },
   "Description": {
-    "zh-CN": "PicGo-Web 内置默认主题：只接管首页，其余页面走内置界面。",
-    "en": "PicGo-Web built-in default theme: renders the homepage only; all other pages use the built-in UI."
+    "zh-CN": "PicGo-Web 官方默认主题：只接管首页，其余页面走内置界面。",
+    "en": "PicGo-Web official default theme: renders the homepage only; all other pages use the built-in UI."
   },
-  "Author": "PicGo-Web",
+  "Author": "Yeqingky",
   "Version": "1.0.0",
-  "URL": "https://github.com/YeqingKy/PicGo-Web",
+  "URL": "https://github.com/Yeqingky/PicGo-Web-Theme",
   "Preview": "screenshot.png",
-  "Pages": ["/"],
+  "Pages": [
+    "/"
+  ],
   "Configuration": {
     "Type": "managed",
     "Items": [
@@ -78,16 +80,60 @@
         "Type": "json",
         "Required": false,
         "Default": [
-          { "Icon": "server", "Title": "多存储驱动", "Desc": "同一驱动类型可添加多条实例，GitHub / S3 / WebDAV / 七牛 / 阿里云 OSS …" },
-          { "Icon": "puzzle", "Title": "插件生态", "Desc": "直接复用 PicGo 的插件体系，安装即生效" },
-          { "Icon": "list", "Title": "后端队列", "Desc": "队列 + 并发限制 + 失败重试 + 重启恢复，进度实时推送" },
-          { "Icon": "folder", "Title": "魔法路径", "Desc": "每个存储配置独立设置命名模板，路径随驱动能力自动降级" },
-          { "Icon": "shield", "Title": "配额与审计", "Desc": "按字节限额、管理员可调；每次操作留痕可追溯" }
+          {
+            "Icon": "server",
+            "Title": "多存储驱动",
+            "Desc": "同一驱动类型可添加多条实例，GitHub / S3 / WebDAV / 七牛 / 阿里云 OSS …"
+          },
+          {
+            "Icon": "puzzle",
+            "Title": "插件生态",
+            "Desc": "直接复用 PicGo 的插件体系，安装即生效"
+          },
+          {
+            "Icon": "list",
+            "Title": "后端队列",
+            "Desc": "队列 + 并发限制 + 失败重试 + 重启恢复，进度实时推送"
+          },
+          {
+            "Icon": "folder",
+            "Title": "魔法路径",
+            "Desc": "每个存储配置独立设置命名模板，路径随驱动能力自动降级"
+          },
+          {
+            "Icon": "shield",
+            "Title": "配额与审计",
+            "Desc": "按字节限额、管理员可调；每次操作留痕可追溯"
+          }
         ],
         "ItemSchema": [
-          { "Key": "Icon", "Name": { "zh-CN": "图标", "en": "Icon" }, "Type": "string", "Required": true },
-          { "Key": "Title", "Name": { "zh-CN": "标题", "en": "Title" }, "Type": "string", "Required": true },
-          { "Key": "Desc", "Name": { "zh-CN": "描述", "en": "Description" }, "Type": "text", "Required": true }
+          {
+            "Key": "Icon",
+            "Name": {
+              "zh-CN": "图标",
+              "en": "Icon"
+            },
+            "Type": "string",
+            "Required": true
+          },
+          {
+            "Key": "Title",
+            "Name": {
+              "zh-CN": "标题",
+              "en": "Title"
+            },
+            "Type": "string",
+            "Required": true
+          },
+          {
+            "Key": "Desc",
+            "Name": {
+              "zh-CN": "描述",
+              "en": "Description"
+            },
+            "Type": "text",
+            "Required": true
+          }
         ]
       },
       {
@@ -99,14 +145,50 @@
         "Type": "json",
         "Required": false,
         "Default": [
-          { "Icon": "user", "Title": "个人图床", "Desc": "把自己的图片集中管理，随时复制外链" },
-          { "Icon": "users", "Title": "小团队共享", "Desc": "每人独立账号与配额，图片彼此隔离" },
-          { "Icon": "book", "Title": "写作配图", "Desc": "一键复制 Markdown / HTML / 直链" }
+          {
+            "Icon": "user",
+            "Title": "个人图床",
+            "Desc": "把自己的图片集中管理，随时复制外链"
+          },
+          {
+            "Icon": "users",
+            "Title": "小团队共享",
+            "Desc": "每人独立账号与配额，图片彼此隔离"
+          },
+          {
+            "Icon": "book",
+            "Title": "写作配图",
+            "Desc": "一键复制 Markdown / HTML / 直链"
+          }
         ],
         "ItemSchema": [
-          { "Key": "Icon", "Name": { "zh-CN": "图标", "en": "Icon" }, "Type": "string", "Required": true },
-          { "Key": "Title", "Name": { "zh-CN": "标题", "en": "Title" }, "Type": "string", "Required": true },
-          { "Key": "Desc", "Name": { "zh-CN": "描述", "en": "Description" }, "Type": "text", "Required": true }
+          {
+            "Key": "Icon",
+            "Name": {
+              "zh-CN": "图标",
+              "en": "Icon"
+            },
+            "Type": "string",
+            "Required": true
+          },
+          {
+            "Key": "Title",
+            "Name": {
+              "zh-CN": "标题",
+              "en": "Title"
+            },
+            "Type": "string",
+            "Required": true
+          },
+          {
+            "Key": "Desc",
+            "Name": {
+              "zh-CN": "描述",
+              "en": "Description"
+            },
+            "Type": "text",
+            "Required": true
+          }
         ]
       },
       {
@@ -118,14 +200,42 @@
         "Type": "json",
         "Required": false,
         "Default": [
-          { "Question": "图片存在哪里？", "Answer": "图片存储与分发完全由图床（PicGo 内核及其插件）负责，本系统只保存元数据与外链。" },
-          { "Question": "支持哪些图床？", "Answer": "取决于已安装的 PicGo 内置驱动与插件。存储驱动由管理员在后台配置。" },
-          { "Question": "能用 PicGo 桌面端上传吗？", "Answer": "可以。本系统提供 Lsky v1 兼容接口，第三方客户端填入裸域名即可接入。" },
-          { "Question": "怎么控制容量？", "Answer": "按字节为每个用户设置配额，管理员可在用户管理里单独调整。" }
+          {
+            "Question": "图片存在哪里？",
+            "Answer": "图片存储与分发完全由图床（PicGo 内核及其插件）负责，本系统只保存元数据与外链。"
+          },
+          {
+            "Question": "支持哪些图床？",
+            "Answer": "取决于已安装的 PicGo 内置驱动与插件。存储驱动由管理员在后台配置。"
+          },
+          {
+            "Question": "能用 PicGo 桌面端上传吗？",
+            "Answer": "可以。本系统提供 Lsky v1 兼容接口，第三方客户端填入裸域名即可接入。"
+          },
+          {
+            "Question": "怎么控制容量？",
+            "Answer": "按字节为每个用户设置配额，管理员可在用户管理里单独调整。"
+          }
         ],
         "ItemSchema": [
-          { "Key": "Question", "Name": { "zh-CN": "问题", "en": "Question" }, "Type": "string", "Required": true },
-          { "Key": "Answer", "Name": { "zh-CN": "答案", "en": "Answer" }, "Type": "text", "Required": true }
+          {
+            "Key": "Question",
+            "Name": {
+              "zh-CN": "问题",
+              "en": "Question"
+            },
+            "Type": "string",
+            "Required": true
+          },
+          {
+            "Key": "Answer",
+            "Name": {
+              "zh-CN": "答案",
+              "en": "Answer"
+            },
+            "Type": "text",
+            "Required": true
+          }
         ]
       }
     ]

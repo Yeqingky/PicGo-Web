@@ -205,6 +205,7 @@ describe('CapabilityCache', () => {
   const caps = (v: string) => ({
     SupportsPathTemplate: true,
     SupportsRemoteDelete: false,
+    ServerRenames: false,
     ConfigFields: [],
     PathFieldNames: [],
     DetectedAt: 0,

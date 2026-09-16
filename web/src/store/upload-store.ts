@@ -47,7 +47,6 @@ export interface UploadBatch {
   JobUID: string
   StorageUID: string
   StorageName: string
-  AlbumUID: string
   CreatedAt: number
 }
 
@@ -56,16 +55,13 @@ interface UploadState {
   batches: UploadBatch[]
   /** 当前选中的目标存储（只影响**新加入**队列的文件，D38） */
   targetStorageUID: string
-  /** 当前选中的相册（可选） */
-  targetAlbumUID: string
   /** 是否正在提交（防重复点击） */
   submitting: boolean
 }
 
 interface UploadActions {
   setTargetStorage: (storageUID: string) => void
-  setTargetAlbum: (albumUID: string) => void
-  /** 加入待上传文件（会用当前的目标存储/相册创建新批次）。 */
+  /** 加入待上传文件（会用当前的目标存储创建新批次）。 */
   addFiles: (files: File[]) => void
   removeItem: (id: string) => void
   /** 重试单个失败项（按该项自己的批次驱动重传）。 */
@@ -115,15 +111,10 @@ export const useUploadStore = create<UploadState & UploadActions>()((set, get) =
   items: [],
   batches: [],
   targetStorageUID: '',
-  targetAlbumUID: '',
   submitting: false,
 
   setTargetStorage(storageUID) {
     set({ targetStorageUID: storageUID })
-  },
-
-  setTargetAlbum(albumUID) {
-    set({ targetAlbumUID: albumUID })
   },
 
   addFiles(files) {
@@ -243,7 +234,6 @@ async function submitPending(): Promise<void> {
         break
       }
 
-      const albumUID = state.targetAlbumUID
       const ids = pending.map((item) => item.ID)
       const files = pending.map((item) => item.File)
 
@@ -255,7 +245,7 @@ async function submitPending(): Promise<void> {
       }))
 
       try {
-        const res = await uploadApi.create({ Files: files, StorageUID: storageUID, AlbumUID: albumUID })
+        const res = await uploadApi.create({ Files: files, StorageUID: storageUID })
 
         // 记录批次 + 把后端返回的 UploadUID / jobUID 绑到队列项
         useUploadStore.setState((prev) => ({
@@ -265,7 +255,6 @@ async function submitPending(): Promise<void> {
               JobUID: res.JobUID,
               StorageUID: res.StorageUID,
               StorageName: storageUID,
-              AlbumUID: albumUID,
               CreatedAt: Date.now(),
             },
           ],

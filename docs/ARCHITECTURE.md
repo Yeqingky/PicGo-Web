@@ -58,7 +58,7 @@ PicGo Cloud、lsky-pro 历史数据导入、备份 / 恢复功能（D53–D63、
 │  · 静态资源托管：内置 SPA（embed web/dist）+ 首页主题（data/themes/）  │
 │    · 路由分发见 §9.3；/assets/** 属内置 SPA，/theme-assets/** 属主题   │
 │  · 鉴权：邮箱密码 / GitHub OAuth（先绑定）/ JWT + refresh / API Token │
-│  · REST API：用户 配额 图库 相册 存储 插件 任务 日志 设置              │
+│  · REST API：用户 配额 图库 存储 插件 任务 日志 设置                    │
 │  · SQLite（默认）/ PostgreSQL（可选）                                │
 │  · 配置真相源：SystemSettings / UserSettings（KV）                   │
 │  · 上传队列 + worker pool（默认并发 1）                              │
@@ -99,8 +99,8 @@ PicGo Cloud、lsky-pro 历史数据导入、备份 / 恢复功能（D53–D63、
 | 其余路径 | 内置 SPA 的 SPA 回退，或**当前主题**（若被其 `Pages` 接管） | — | — | 分发算法见 §9.3 |
 
 **两个前缀天然隔离，不存在路径冲突。** 前一版设计曾让内部 API 与 Lsky 层共享 `/api/v1`，
-并把内部相册让位到 `/api/v1/gallery/albums`；**D80 之后已取消**，
-内部相册回到普通路径 **`/api/web/v1/albums`**。
+并把内部相册让位到 `/api/v1/gallery/albums`；**D80 之后已取消**
+（相册功能本身后来亦被移除，D101）。
 
 仍保留一道**启动时路由冲突检测**作为防护：注册完路由后校验内部路由前缀不与 Lsky 保留集
 （`/api/v1/{tokens,profile,strategies,upload,images,albums}`）重叠，重叠则直接 `panic`。
@@ -189,10 +189,7 @@ PicGo-Web/
 │   ├── PLAN.md                   # 分工、里程碑、验收
 │   └── research/                 # lsky-pro / skyImage 调研报告（参考用）
 │
-├── deploy/
-│   └── docker/
-│       ├── Dockerfile            # 多阶段：web 构建 → 默认主题打包 → agent 构建 → Go 编译 → 运行时
-│       └── entrypoint.sh
+├── Dockerfile                    # 生产镜像（根目录，多阶段：web 构建 → agent 构建 → Go 编译 → alpine 运行时）
 │
 ├── themes/
 │   └── default/                  # ★ 默认首页主题的源（二进制用 go:embed 内嵌同一份作兜底）
@@ -208,7 +205,7 @@ PicGo-Web/
 │   └── internal/
 │       ├── config/               # 引导类配置（env/.env）+ defaults.go 配置键默认值表
 │       ├── database/             # GORM 初始化（NoLowerCase）+ dsn.go + migrations.go + SchemaMeta
-│       ├── model/                # 21 张表的 GORM 模型（每个显式 TableName()，见 §5）
+│       ├── model/                # 20 张表的 GORM 模型（每个显式 TableName()，见 §5）
 │       ├── repository/           # 数据访问层：**唯一** 允许直接使用 *gorm.DB 的层
 │       ├── service/              # 业务逻辑层（配额/限流/队列/存储同步/删除/日志）
 │       ├── handler/              # HTTP 处理层（Gin）：参数绑定与响应封装，不写业务
@@ -252,10 +249,6 @@ PicGo-Web/
     ├── package.json
     ├── vite.config.ts            # dev 时 proxy '/api' → :8080；内置 SPA 的 base 为 '/'
     ├── index.html                # 内置 SPA 入口
-    ├── theme-default/            # ★ 默认首页主题的源码（独立构建入口）
-    │   ├── index.html            #   base 必须设为 /theme-assets/
-    │   ├── manifest.json         #   与主题一起打包（Pages / Configuration.Items）
-    │   └── src/                  #   落地页：Hero + 能力 + 场景 + FAQ + CTA（DESIGN.md §4.2）
     └── src/
         ├── main.tsx
         ├── App.tsx               # createBrowserRouter 挂载
@@ -388,7 +381,7 @@ default:
 | 前端 TS **类型字段** | **PascalCase**（与 API JSON 一致，不手写转换） | `interface Upload { UID: string; JobUID: string }` |
 | 前端 TS **变量 / 函数 / store** | camelCase（**不变**，符合 JS 生态） | `const accessToken = res.AccessToken` / `fetchUploads()` |
 | Go 局部变量 / 函数 | camelCase（**不变**） | `func handleUpload()` |
-| **URL 路径段** | **小写复数** | `/api/web/v1/storage/configs`、`/uploads`、`/albums`、`/logs` |
+| **URL 路径段** | **小写复数** | `/api/web/v1/storage/configs`、`/uploads`、`/logs` |
 
 **缩写词一律全大写**：`UID` / `URL` / `ID` / `API` / `HTTP` / `TLS` / `SMTP` / `CSRF` / `JSON`
 （符合 Go 社区惯例，golint / staticcheck 推荐）。
@@ -480,13 +473,13 @@ gorm.Open(dialector, &gorm.Config{
 | **一对多关系** | `EmailLogs` 独立成表，不塞 JSON | 可索引、可分页、可统计 |
 | **生命周期不同**（主题） | `ThemeConfigs` 独立于 `SystemSettings`（D95） | 主题配置随主题装卸而生灭；每行带 `UpdatedBy`，可逐键审计；两个管理员改不同键**不互相覆盖** |
 
-**域分组（21 张表，详见 [`DATA-MODEL.md`](./DATA-MODEL.md)）**：
+**域分组（20 张表，详见 [`DATA-MODEL.md`](./DATA-MODEL.md)）**：
 
 ```
 身份鉴权  Users / UserProfiles / OAuthIdentities / RefreshTokens / APITokens / LoginAttempts
 存储配置  StorageConfigs / StorageSecrets
 主题配置  ThemeConfigs
-媒体资源  Uploads / UploadResults / Albums
+媒体资源  Uploads / UploadResults
 任务执行  Jobs / JobItems / JobLogs
 审计记录  OperationLogs / EmailLogs
 系统配置  SystemSettings / UserSettings
@@ -626,7 +619,6 @@ type Service interface {
 ┌─ Browser ───────────────────────────────────────────────────────────────┐
 │ 图库页拖入 3 张图，选中存储「我的坚果云 WebDAV」（uid=st_01H…）              │
 │ POST /api/web/v1/uploads  multipart: Files[]=3, StorageUID=st_01H…,       │
-│                                   AlbumUID=<可空>                        │
 │ Cookie: pcw_at（或 Authorization: Bearer …）                             │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                ▼
@@ -640,9 +632,9 @@ type Service interface {
 └──────────────────────────────┬──────────────────────────────────────────┘
                                ▼
 ┌─ handler/upload.go（内部 API 处理器）───────────────────────────────────┐
-│ · 解析 multipart，读取 StorageUID / AlbumUID                             │
+│ · 解析 multipart，读取 StorageUID                                        │
 │ · 校验：文件数 > 0、单文件 ≤ upload.maxSizeBytes、扩展名在白名单内          │
-│ · 拒绝 SVG（若 upload.blockSvg）                                         │
+│ · 拒绝 SVG（upload.blockSvg 默认开启）                                   │
 │ · 按内容嗅探 MIME（**不信任 Content-Type**）                              │
 │ · 生成 Job.UID，落盘暂存 <dataDir>/uploads/<yyyy>/<mm>/<ulid>.<ext>       │
 │ · 计算 sha256（仅记录，不做去重 —— D66）                                  │
@@ -650,7 +642,6 @@ type Service interface {
                                ▼
 ┌─ service/upload.go ────────────────────────────────────────────────────┐
 │ · 解析 StorageUID → StorageConfigs（不存在/未启用 → 40401 / 40901）       │
-│ · 资源归属校验：AlbumUID 必须属于当前用户（或管理员）                       │
 │ · ★ 配额校验：UsedBytes + 本批总大小 > CapacityBytes → 40302              │
 │        └─ CapacityBytes = 0 视为不限额；**管理员跳过**（D20 例外 1）       │
 │ · ★ 限流校验：upload.rateLimit.enabled（默认 false）                      │
@@ -697,7 +688,6 @@ type Service interface {
 │                    插件回写的 sha 等字段只能靠它留住 —— D47）              │
 │  · JobItems：Status=succeeded, FinishedAt                                │
 │  · Users.UsedBytes += Size（D20）                                        │
-│  · Albums.ImageCount += 1（若归属相册）                                   │
 │  · OperationLogs：Type=upload, Status=success                            │
 │ 失败分支：Uploads.Status=failed + Error；JobItems.Status=failed；          │
 │          OperationLogs Type=upload Status=failed                        │
@@ -739,7 +729,7 @@ GET /api/web/v1/events
        · 系统级（system.notice —— 服务重启、agent 状态变化、配置 syncPending）
 ```
 
-前端断线由 `EventSource` 自动重连；重连后前端主动拉一次当前任务列表做对账
+前端断线由 `EventSource` 指数退避重连；每次重连前先用 `GET /auth/me` 做会话校验，若 `pcw_at` 过期则由 HTTP 客户端用 `pcw_rt` 静默刷新。重连后前端主动拉一次当前任务列表做对账
 （SSE 只保证「新事件」，不保证「补发历史」）。
 
 ### 7.3 首页请求（主题路径）
@@ -792,7 +782,7 @@ GET /  （未登录也是这个路径 —— 首页永远公开）
 | 魔法路径 / 魔法文件名 | **本项目决定，agent 执行** | 模板存在 `StorageConfigs`，由 agent 在 `beforeUploadPlugins` 里落地（D42–D44、D70） |
 | 远端删除 | **agent**（靠 `remove` 约定） | 插件实现 `remove` 才生效（D47） |
 | 驱动能力探测 | **agent 探测 → DB 缓存** | 结果存 `StorageConfigs.Capabilities`（D77：不硬编码驱动名） |
-| 图片元数据 / 相册 / 配额 / 限流 | **Go** | agent 只返回 URL 与尺寸 |
+| 图片元数据 / 配额 / 限流 | **Go** | agent 只返回 URL 与尺寸 |
 | 用户、鉴权、权限、审计 | **Go** | picgo-core 全局单实例，权限完全由 Go 控制 |
 
 ### 8.2 picgo `upload()` 的失败语义（实测）
@@ -979,7 +969,7 @@ agent 侧实现三件事：
 | 项 | 内容 |
 |---|---|
 | **注册机制** | 主题在 `manifest.json` 用 **`Pages`** **自行注册**要接管的页面；**未注册的页面一律走内置 SPA** |
-| **可注册页面** | `/`、`/upload`、`/gallery`、`/albums`、`/jobs`、`/logs`、`/settings`（**业务页面**均可注册） |
+| **可注册页面** | `/`、`/overview`、`/upload`、`/gallery`、`/jobs`、`/settings`（**业务页面**均可注册；普通用户日志页 `/logs` 已移除） |
 | **不可注册** | 全部认证页 + `/admin/**` —— 代码硬编码保留（安全底线，manifest 声明无效） |
 | **默认主题** | 只注册 `["/"]`（首页），因此默认体验下只有首页走主题 |
 | **内置 SPA** | `go:embed web/dist` —— 回到单二进制方案，除主题接管的页面外的资源全部 embed |
@@ -995,7 +985,7 @@ agent 侧实现三件事：
 |---|---|---|---|
 | **`/`（首页落地页）** | **当前主题** | ✅ 可换主题 | 默认主题的 `Pages = ["/"]` |
 | `/login`、`/first-login`、`/forgot-password`、`/reset-password`、`/logout` | **内置 SPA**（embed） | ❌ **永久保留** | 认证页保留列表（§9.5） |
-| `/upload`、`/gallery`、`/gallery/:UID`、`/albums`、`/jobs`、`/logs`、`/settings` | **内置 SPA**（embed），**主题可注册接管** | ✅ 可注册 | 主题在 `Pages` 声明即接管，**Go 零改动** |
+| `/overview`、`/upload`、`/gallery`、`/gallery/:UID`、`/jobs`、`/settings` | **内置 SPA**（embed），**主题可注册接管** | ✅ 可注册 | 主题在 `Pages` 声明即接管，**Go 零改动** |
 | `/admin/**` | **内置 SPA**（embed） | ❌ **永久保留** | 后台是敏感界面 |
 | `/api/web/v1/**`、`/api/v1/**`、`/healthz` | Go 后端 | ❌ | 保留路径 |
 | `/theme-assets/**` | **当前主题**的 `assets/` | 随主题 | 主题**唯一**的资源前缀 |
@@ -1232,6 +1222,7 @@ agent 侧实现三件事：
 │                            （单一 URL，直接 <img src>，**不做任何判断**，D97）
 │                            资源前缀为 /theme-assets/**（§9.4）
 │                            ⚠️ 该路径由主题渲染时，内置 SPA **不参与渲染**
+│                            ⚠️ 内置 SPA **不占用 `/`**：控制台概览页固定使用 `/overview`（D102）
 ├── /login                   登录 ★ **内置 SPA**（主题无法接管，§9.5）
 │                            （邮箱 + 密码；GitHub 按钮仅当已绑定时可用，D27）
 ├── /forgot-password         忘记密码（发信）
@@ -1239,13 +1230,12 @@ agent 侧实现三件事：
 └── /first-login             首启强制改密（Users.MustChangePassword，D32）
 
 需登录（AppShell 布局）
+├── /overview                概览（控制台落地页；**不用 `/`**，`/` 是主题首页，D102）
 ├── /upload                  上传（拖拽/选择/粘贴、目标存储单选、进度队列）
 ├── /gallery                 图库（**不做缩略图**，直接引图床 URL，D84；筛选/批量/灯箱/外链复制）
 │                            管理员：顶部 Tab「我的图片 | 全部图片」（D71）
-├── /gallery/:UID            图片详情（大图、元数据、重命名/移动/删除）
-├── /albums                  相册管理
+├── /gallery/:UID            图片详情（大图、元数据、重命名/删除）
 ├── /jobs                    任务面板（Jobs 列表 + JobLogs 实时日志）
-├── /logs                    操作日志（类型过滤 + 关键词搜索）
 └── /settings                个人设置（资料、改密、GitHub 绑定、API Token、偏好）
 
 需管理员（全部为内置 SPA，**主题永久无法接管**，§9.5）
@@ -1267,6 +1257,7 @@ agent 侧实现三件事：
 | 守卫 | 行为 |
 |---|---|
 | `RequireAuth` | 未登录 → 跳 `/login?redirect=`；`MustChangePassword` → 跳 `/first-login` |
+| `RequireAnonymous` | 已登录访问 `/login` 等 → 跳 `/overview`（**不是 `/`**，D102） |
 | `RequireAdmin` | `Role != admin` → 渲染 403 页（不跳转，避免用户困惑） |
 | 导航可插拔 | 侧栏项由 `lib/navigation.ts` 的配置数组驱动（含权限谓词），**新页面只需往数组加一项**（D77.2） |
 
@@ -1275,14 +1266,14 @@ agent 侧实现三件事：
 | 状态类型 | 归属 | 例子 |
 |---|---|---|
 | **服务端数据** | 自研 hooks + Axios | 图库列表、用户列表、存储配置、插件列表、日志、任务列表 |
-| **客户端状态** | **Zustand** | 当前登录用户快照、主题、侧栏折叠、图库筛选条件（选中存储/相册/关键词/视图模式）、上传队列的本地视图、任务面板展开状态 |
+| **客户端状态** | **Zustand** | 当前登录用户快照、主题、侧栏折叠、图库筛选条件（选中存储/关键词/视图模式）、上传队列的本地视图、任务面板展开状态 |
 | **实时推送** | SSE → Zustand（仅「写入客户端状态」） | 上传进度、任务日志流、agent 状态、系统通知 |
 
 **铁律**：
 
 - ❌ **不把服务端返回的数据镜像进 Zustand**（避免双份真相与陈旧数据）
 - ✅ Zustand 只存「用户的意图与本地 UI 状态」；服务端数据的刷新由 hooks 负责
-- ✅ 两者用**标识符**连接（如 `StorageUID`、`AlbumUID`、`JobUID`），而不是把整个对象拷进 store
+- ✅ 两者用**标识符**连接（如 `StorageUID`、`JobUID`），而不是把整个对象拷进 store
 - ✅ SSE 到达时：进度类直接更新 Zustand 的上传队列；**结果类（完成/失败）触发对应 hook 重新拉取**
 
 Zustand store 划分（均在 `web/src/store/`，命名以 `PLAN.md` 的实施目录树为准）：
@@ -1417,7 +1408,7 @@ features/<域>/*         页面级组件，按业务域切分；跨域复用的�
 | **开放更多页面给主题 / 放开通配** | ⚠️ `"/*"` 通配语法**已支持**；但**认证页与 `/admin/**` 的保留列表不可放开**（§9.5，安全默认值）。要放开须改代码并重新评估风险 | ❌ | ⚠️ 需评审 |
 | **新的内容域**（如「分享链接」「评论」） | **新建独立表** + `schemaMigrations` 追加一条 | ✅ 只追加 | ❌ |
 | **某个表加少量字段** | 先试 `Metadata` JSON；确实要索引再加列（可空） | 视情况 | ❌ |
-| **图片可见性升级**（如按相册共享） | `Metadata` 或新表；当前靠 `UserUID` 归属过滤 | 视方案 | 需改查询条件 |
+| **图片可见性升级**（如批量共享） | `Metadata` 或新表；当前靠 `UserUID` 归属过滤 | 视方案 | 需改查询条件 |
 | **提高上传并发** | 改 `upload.concurrency`（补丁已落地，见 §8.6） | ❌ | ❌ 只改配置值 |
 | **新的 OAuth 平台** | 需满足 D28（平台提供稳定唯一标识）；在 `internal/auth` 加 provider + settings 键 | ❌ | ❌ |
 | **多语言** | `web/src/i18n/` 加语言目录 | ❌ | ❌ |
@@ -1489,7 +1480,7 @@ features/<域>/*         页面级组件，按业务域切分；跨域复用的�
 | 大小限制 | `upload.maxSizeBytes`（默认 20 MiB） |
 | 扩展名白名单 | `upload.allowedExts` |
 | MIME 校验 | **按内容嗅探**，不信任 `Content-Type` 头 |
-| SVG | 可选禁用（`upload.blockSvg`）—— SVG 可携带脚本 |
+| SVG | 默认禁用（`upload.blockSvg`）—— SVG 可携带脚本，显式关闭后才允许 |
 | 文件名 | 落盘用生成的 ULID，**不使用用户提供的文件名做路径**（防路径穿越） |
 | 暂存清理 | 上传后按 `upload.keepLocalCopy` / `keepLocalDays` 清理 |
 | 远端抓取 | `POST /uploads/from-url` 需做 SSRF 防护：解析真实 IP，拒绝私网/回环（可用开关关闭） |

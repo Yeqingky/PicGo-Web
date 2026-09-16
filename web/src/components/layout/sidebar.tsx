@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router'
 
-import { QuotaBar } from '@/components/layout/quota-bar'
+import { SidebarFooter } from '@/components/layout/sidebar-footer'
 import { navGroupTitle, navGroups, navItemLabel, type NavItem } from '@/lib/navigation'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
@@ -10,6 +10,12 @@ interface SidebarProps {
   collapsed?: boolean
   /** 点击导航项后的回调（移动端抽屉用来关闭自己） */
   onNavigate?: () => void
+  /** 当前 PicGo-Web 服务版本（来自公开站点配置）。 */
+  serverVersion?: string
+  /** GitHub 最新正式 Release 版本。 */
+  latestVersion?: string
+  /** GitHub 最新正式 Release 是否高于当前版本。 */
+  updateAvailable?: boolean
   className?: string
 }
 
@@ -20,7 +26,14 @@ interface SidebarProps {
  * - 当前项用强调色 `--brand`（DESIGN.md §2.1：强调色只用于主 CTA、当前导航项、聚焦环、进度条）
  * - 「管理」分组仅管理员渲染 —— 但**隐藏菜单不是权限**，后端仍独立鉴权
  */
-export function Sidebar({ collapsed = false, onNavigate, className }: SidebarProps) {
+export function Sidebar({
+  collapsed = false,
+  onNavigate,
+  serverVersion,
+  latestVersion,
+  updateAvailable = false,
+  className,
+}: SidebarProps) {
   const isAdmin = useAuthStore((state) => state.user?.Role === 'admin')
 
   return (
@@ -79,7 +92,12 @@ export function Sidebar({ collapsed = false, onNavigate, className }: SidebarPro
       </nav>
 
       <div className="border-t border-border">
-        <QuotaBar />
+        <SidebarFooter
+          collapsed={collapsed}
+          serverVersion={serverVersion}
+          latestVersion={latestVersion}
+          updateAvailable={updateAvailable}
+        />
       </div>
     </div>
   )

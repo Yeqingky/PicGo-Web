@@ -38,7 +38,6 @@ type w5Env struct {
 	users   *repository.UserRepo
 	tokens  *repository.TokenRepo
 	uploads *repository.UploadRepo
-	albums  *repository.AlbumRepo
 	jobs    *repository.JobRepo
 	logs    *repository.LogRepo
 	emails  *repository.EmailLogRepo
@@ -48,7 +47,6 @@ type w5Env struct {
 	storage  *StorageService
 	upload   *UploadService
 	gallery  *GalleryService
-	albumSvc *AlbumService
 	jobSvc   *JobService
 	logSvc   *LogService
 	emailSvc *EmailService
@@ -133,7 +131,6 @@ func newW5Env(t *testing.T, opts ...func(*w5Options)) *w5Env {
 		users:   repository.NewUserRepo(db.DB),
 		tokens:  repository.NewTokenRepo(db.DB),
 		uploads: repository.NewUploadRepo(db.DB),
-		albums:  repository.NewAlbumRepo(db.DB),
 		jobs:    repository.NewJobRepo(db.DB),
 		logs:    repository.NewLogRepo(db.DB),
 		emails:  repository.NewEmailLogRepo(db.DB),
@@ -141,10 +138,9 @@ func newW5Env(t *testing.T, opts ...func(*w5Options)) *w5Env {
 	}
 	env.audit = NewAuditService(env.logs, log)
 	env.storage = NewStorageService(cfg, log, settingsSvc, cipher, env.stores, mockAgent, env.audit)
-	env.albumSvc = NewAlbumService(log, env.albums, env.uploads, env.audit)
 	env.upload = NewUploadService(cfg, log, settingsSvc, env.uploads, env.jobs, env.users,
-		env.albums, env.storage, mockAgent, hub, env.audit)
-	env.gallery = NewGalleryService(cfg, log, settingsSvc, env.uploads, env.albums, env.users,
+		env.storage, mockAgent, hub, env.audit)
+	env.gallery = NewGalleryService(cfg, log, settingsSvc, env.uploads, env.users,
 		env.storage, mockAgent, hub, env.audit)
 	env.jobSvc = NewJobService(log, env.jobs, env.uploads, env.audit)
 	env.logSvc = NewLogService(log, env.logs, env.emails)

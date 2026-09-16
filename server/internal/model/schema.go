@@ -35,7 +35,6 @@ func AllModels() []any {
 		// 媒体资源
 		&Upload{},
 		&UploadResult{},
-		&Album{},
 		// 任务执行
 		&Job{},
 		&JobItem{},

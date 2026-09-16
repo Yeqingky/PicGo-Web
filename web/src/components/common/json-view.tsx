@@ -75,7 +75,7 @@ export function JsonView({
           className="inline-flex items-center gap-1 text-xs text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         >
           {open ? <ChevronDown className="size-3" aria-hidden /> : <ChevronRight className="size-3" aria-hidden />}
-          {open ? t('JSON_COLLAPSE') : t('JSON_EXPAND_ALL', { lines: lines.length })}
+          {open ? t('JSON_COLLAPSE') : t('JSON_EXPAND_ALL')}
         </button>
       ) : null}
     </div>

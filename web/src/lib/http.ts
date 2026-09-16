@@ -97,6 +97,9 @@ function normalizeError(error: AxiosError): ApiError {
     if (status >= 500) {
       return new ApiError(ApiCode.Internal, `服务暂时不可用（HTTP ${status}）`, status)
     }
+    if (status === 401) {
+      return new ApiError(ApiCode.Unauthorized, '登录已失效，请重新登录', status)
+    }
     if (status === 404) {
       return new ApiError(ApiCode.NotFound, '接口不存在（前端与后端版本可能不一致）', status)
     }
@@ -144,6 +147,29 @@ function notifyAuthFailure(): void {
   authFailureHandler?.()
 }
 
+/** 处理统一信封中的业务错误，兼容 HTTP 200 与 HTTP 4xx/5xx 响应。 */
+function handleApiError(
+  config: RetriableConfig | undefined,
+  error: ApiError,
+): Promise<AxiosResponse> {
+  if (config && !config.skipAuthRetry && !config._retried && error.isAuthError) {
+    config._retried = true
+    return refreshOnce()
+      .then(() => http.request(config))
+      .catch((refreshError: unknown) => {
+        notifyAuthFailure()
+        return Promise.reject(
+          refreshError instanceof ApiError ? refreshError : error,
+        )
+      })
+  }
+
+  if (error.isAuthError || error.Code === ApiCode.AccountDisabled) {
+    notifyAuthFailure()
+  }
+  return Promise.reject(error)
+}
+
 http.interceptors.response.use(
   (response: AxiosResponse) => {
     const config = response.config as RetriableConfig
@@ -163,35 +189,31 @@ http.interceptors.response.use(
     }
 
     // 业务失败
-    const error = new ApiError(body.Code, body.Message, response.status, body.Data)
-
-    // 40102 / 40103 → 静默刷新一次
-    if (
-      !config.skipAuthRetry &&
-      !config._retried &&
-      (body.Code === ApiCode.Unauthorized || body.Code === ApiCode.TokenExpired)
-    ) {
-      config._retried = true
-      return refreshOnce()
-        .then(() => http.request(config))
-        .catch((refreshError: unknown) => {
-          notifyAuthFailure()
-          return Promise.reject(
-            refreshError instanceof ApiError
-              ? refreshError
-              : new ApiError(body.Code, body.Message, response.status, body.Data),
-          )
-        })
-    }
-
-    // 刷新请求本身失败 → 直接登出
-    if (body.Code === ApiCode.Unauthorized || body.Code === ApiCode.TokenExpired) {
-      notifyAuthFailure()
-    }
-
-    return Promise.reject(error)
+    return handleApiError(
+      config,
+      new ApiError(body.Code, body.Message, response.status, body.Data),
+    )
   },
-  (error: AxiosError) => Promise.reject(normalizeError(error)),
+  (error: AxiosError) => {
+    const config = error.config as RetriableConfig | undefined
+    const response = error.response
+    const body = response?.data
+
+    // Axios 默认会把 HTTP 401/4xx 交给 rejected handler；后端仍返回统一信封，
+    // 因此这里必须走与 HTTP 200 + Code 非 0 相同的刷新/重放逻辑。
+    if (isEnvelope(body)) {
+      return handleApiError(
+        config,
+        new ApiError(body.Code, body.Message, response?.status ?? 0, body.Data),
+      )
+    }
+
+    const normalized = normalizeError(error)
+    if (normalized.isAuthError || normalized.Code === ApiCode.AccountDisabled) {
+      return handleApiError(config, normalized)
+    }
+    return Promise.reject(normalized)
+  },
 )
 
 // ---------------------------------------------------------------------------

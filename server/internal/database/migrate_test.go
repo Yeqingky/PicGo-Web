@@ -219,7 +219,6 @@ func TestCompositeIndexesExist(t *testing.T) {
 		"idx_storage_enabled_default",
 		"idx_theme_configs_theme_key",
 		"idx_uploads_user_created",
-		"idx_albums_user_name",
 		"idx_jobs_status_created",
 		"idx_job_items_job_seq",
 		"idx_job_logs_job_seq",

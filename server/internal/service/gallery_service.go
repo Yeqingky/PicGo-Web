@@ -20,7 +20,7 @@ import (
 // GalleryService 负责图库的查询与整理（不改上传调度，那是 UploadService）。
 //
 // 职责边界：
-//   - 列表 / 详情 / 重命名 / 移动相册 / 删除 / 外链格式化 / 统计
+//   - 列表 / 详情 / 重命名 / 删除 / 外链格式化 / 统计
 //   - **权限判定**（D33 + D71）：普通用户只能碰自己的；管理员可碰全部，
 //     但**默认落在 mine**（避免误操作他人图片）
 type GalleryService struct {
@@ -28,7 +28,6 @@ type GalleryService struct {
 	log      *slog.Logger
 	settings *settings.Service
 	uploads  *repository.UploadRepo
-	albums   *repository.AlbumRepo
 	users    *repository.UserRepo
 	storage  *StorageService
 	ag       agent.Client
@@ -42,7 +41,6 @@ func NewGalleryService(
 	log *slog.Logger,
 	settingsSvc *settings.Service,
 	uploads *repository.UploadRepo,
-	albums *repository.AlbumRepo,
 	users *repository.UserRepo,
 	storage *StorageService,
 	ag agent.Client,
@@ -51,7 +49,7 @@ func NewGalleryService(
 ) *GalleryService {
 	return &GalleryService{
 		cfg: cfg, log: log, settings: settingsSvc,
-		uploads: uploads, albums: albums, users: users,
+		uploads: uploads, users: users,
 		storage: storage, ag: ag, hub: hub, audit: audit,
 	}
 }
@@ -61,7 +59,6 @@ type UploadView struct {
 	UID        string `json:"UID"`
 	UserUID    string `json:"UserUID"`
 	StorageUID string `json:"StorageUID"`
-	AlbumUID   string `json:"AlbumUID"`
 
 	FileName     string `json:"FileName"`
 	OriginalName string `json:"OriginalName"`
@@ -88,8 +85,6 @@ type UploadView struct {
 	StorageName string `json:"StorageName"`
 	// UserEmail **仅当 `Scope = all`** 时返回（管理员视图）。
 	UserEmail string `json:"UserEmail,omitempty"`
-	// AlbumName 便于前端展示（免二次查询）。
-	AlbumName string `json:"AlbumName,omitempty"`
 
 	CreatedAt int64 `json:"CreatedAt"`
 	UpdatedAt int64 `json:"UpdatedAt"`
@@ -99,7 +94,6 @@ type UploadView struct {
 type GalleryListInput struct {
 	Keyword    string
 	StorageUID string
-	AlbumUID   string
 	Status     string
 	// Scope mine（默认）| all（仅管理员；普通用户会被**静默降级**为 mine）
 	Scope string
@@ -124,7 +118,6 @@ func (s *GalleryService) List(in GalleryListInput, viewer *model.User) ([]Upload
 	f := repository.UploadListFilter{
 		Keyword:    in.Keyword,
 		StorageUID: in.StorageUID,
-		AlbumUID:   in.AlbumUID,
 		Status:     in.Status,
 		Sort:       in.Sort,
 		Order:      in.Order,
@@ -171,11 +164,9 @@ func (s *GalleryService) Get(uid string, viewer *model.User) (*UploadView, error
 // GalleryUpdateInput 是图片更新入参。
 type GalleryUpdateInput struct {
 	AliasName *string
-	// AlbumUID 传空字符串表示移出相册（用指针区分「未传」与「传空」）。
-	AlbumUID *string
 }
 
-// Update 重命名 / 移动相册。
+// Update 重命名。
 //
 // ⚠️ 重命名只改 `AliasName`，**不改远端文件名**：远端 URL 由图床决定（D42/D66 边界），
 // 我们改了本地字段却改不了远端，反而会造成「名字对不上」的困惑。
@@ -200,34 +191,12 @@ func (s *GalleryService) Update(ctx context.Context, uid string, in GalleryUpdat
 		detail["AliasName"] = alias
 	}
 
-	oldAlbum := up.AlbumUID
-	if in.AlbumUID != nil {
-		target := strings.TrimSpace(*in.AlbumUID)
-		if target != "" && !s.albumAccessible(target, viewer) {
-			return nil, Errorf(response.CodeInvalidParam, "目标相册不存在或不属于你")
-		}
-		fields["AlbumUID"] = target
-		detail["AlbumUID"] = target
-	}
-
 	if len(fields) == 0 {
 		return s.Get(uid, viewer)
 	}
 
 	if err := s.uploads.UpdateFields(uid, fields); err != nil {
 		return nil, notFoundOr(err, "图片不存在")
-	}
-
-	// 相册冗余计数：源与目标都要重算
-	if in.AlbumUID != nil && oldAlbum != *in.AlbumUID {
-		for _, albumUID := range []string{oldAlbum, *in.AlbumUID} {
-			if albumUID == "" {
-				continue
-			}
-			if err := s.albums.RecountImages(albumUID); err != nil {
-				s.log.Warn("更新相册计数失败", "album_uid", albumUID, "err", err)
-			}
-		}
 	}
 
 	s.audit.Log(ctx, AuditEntry{
@@ -297,13 +266,6 @@ func (s *GalleryService) Delete(ctx context.Context, uid string, deleteRemote bo
 	}
 	result.Deleted = true
 	result.FreedBytes = freed
-
-	// 相册计数
-	if up.AlbumUID != "" {
-		if err := s.albums.RecountImages(up.AlbumUID); err != nil {
-			s.log.Warn("更新相册计数失败", "album_uid", up.AlbumUID, "err", err)
-		}
-	}
 
 	// ---- 5. 审计 ----
 	detail := map[string]any{
@@ -664,22 +626,6 @@ func (s *GalleryService) toViews(rows []model.Upload, withUser bool) ([]UploadVi
 
 	nameMap := s.storage.NameMap()
 
-	// 相册名（一次查完）
-	albumNames := map[string]string{}
-	albumUIDs := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if r.AlbumUID != "" {
-			albumUIDs = append(albumUIDs, r.AlbumUID)
-		}
-	}
-	if len(albumUIDs) > 0 {
-		if list, err := s.albums.List(repository.AlbumListFilter{}); err == nil {
-			for _, a := range list {
-				albumNames[a.UID] = a.Name
-			}
-		}
-	}
-
 	// 用户邮箱（仅 Scope=all 时返回）
 	userEmails := map[string]string{}
 	if withUser {
@@ -698,7 +644,7 @@ func (s *GalleryService) toViews(rows []model.Upload, withUser bool) ([]UploadVi
 	for i := range rows {
 		r := &rows[i]
 		v := UploadView{
-			UID: r.UID, UserUID: r.UserUID, StorageUID: r.StorageUID, AlbumUID: r.AlbumUID,
+			UID: r.UID, UserUID: r.UserUID, StorageUID: r.StorageUID,
 			FileName: r.FileName, OriginalName: r.OriginalName, AliasName: r.AliasName,
 			Size: r.Size, MimeType: r.MimeType, Extension: r.Extension,
 			Width: r.Width, Height: r.Height, SHA256: r.SHA256,
@@ -706,7 +652,6 @@ func (s *GalleryService) toViews(rows []model.Upload, withUser bool) ([]UploadVi
 			Status: r.Status, Error: r.Error, Source: r.Source, JobUID: r.JobUID,
 			Metadata:    parseJSONMap(r.Metadata),
 			StorageName: nameMap[r.StorageUID],
-			AlbumName:   albumNames[r.AlbumUID],
 			CreatedAt:   r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		}
 		if withUser {
@@ -729,18 +674,6 @@ func assertCanAccess(up *model.Upload, viewer *model.User) error {
 		return Errorf(response.CodeForbidden, "无权操作他人的图片")
 	}
 	return nil
-}
-
-// albumAccessible 判断相册是否可被 viewer 使用（管理员可任意）。
-func (s *GalleryService) albumAccessible(albumUID string, viewer *model.User) bool {
-	a, err := s.albums.FindByUID(albumUID)
-	if err != nil {
-		return false
-	}
-	if viewer.IsAdmin() {
-		return true
-	}
-	return a.UserUID == viewer.UID
 }
 
 func causeIf(cond bool, msg string) error {

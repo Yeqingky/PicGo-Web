@@ -1,4 +1,5 @@
-import { AlertCircle, HardDrive, Loader2, MoreHorizontal, Plus, Star, Zap } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle, HardDrive, Info, Loader2, MoreHorizontal, Plus, Star, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ConfirmDialog } from '@/components/common/confirm-dialog'
@@ -11,7 +12,6 @@ import {
   validateRequired,
 } from '@/components/schema-form'
 import { CapabilityBadges } from '@/components/storage/capability-badges'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -181,15 +181,21 @@ export function AdminStoragePage() {
                   </p>
 
                   <p className="text-xs text-muted-foreground">
-                    {t('STORAGE_PATH_TEMPLATE')}:{' '}
-                    {config.PathTemplate ? (
-                      <code className="rounded bg-muted px-1 py-0.5">{config.PathTemplate}</code>
-                    ) : (
-                      t('STORAGE_TEMPLATE_UNSET')
-                    )}
-                    {config.FileTemplate ? (
+                    {/* 驱动不支持自定义路径时魔法路径没有意义（会降级为文件名前缀），不展示；
+                        ServerRenames 时魔法文件名也被驱动无视，同样不展示 */}
+                    {config.Capabilities?.SupportsPathTemplate ? (
                       <>
-                        {' · '}
+                        {t('STORAGE_PATH_TEMPLATE')}:{' '}
+                        {config.PathTemplate ? (
+                          <code className="rounded bg-muted px-1 py-0.5">{config.PathTemplate}</code>
+                        ) : (
+                          t('STORAGE_TEMPLATE_UNSET')
+                        )}
+                        {config.FileTemplate && !config.Capabilities?.ServerRenames ? ' · ' : null}
+                      </>
+                    ) : null}
+                    {config.FileTemplate && !config.Capabilities?.ServerRenames ? (
+                      <>
                         {t('STORAGE_FILE_TEMPLATE')}:{' '}
                         <code className="rounded bg-muted px-1 py-0.5">{config.FileTemplate}</code>
                       </>
@@ -590,55 +596,76 @@ function StorageConfigDrawer({
             )}
           </section>
 
-          {/* 魔法路径 / 文件名（D43 / D70） */}
+          {/* 魔法路径 / 文件名（D43 / D70）
+              降级链（PicList 同款能力探测）：
+                · 驱动不支持自定义路径 → 不显示魔法路径（会降级为文件名前缀）
+                · 实测图床无视传入文件名（ServerRenames）→ 魔法文件名也没有意义，
+                  用说明替代输入框；探测由「测试连通性」或首次真实上传触发 */}
           <section className="space-y-3">
-            <h3 className="text-sm font-medium text-foreground">{t('STORAGE_SECTION_TEMPLATE')}</h3>
-
-            {config && !config.Capabilities.SupportsPathTemplate ? (
-              <Alert variant="warning">
+            {config?.Capabilities?.ServerRenames ? (
+              <Alert variant="info">
                 <AlertCircle aria-hidden />
-                <AlertDescription>{t('STORAGE_TEMPLATE_UNSUPPORTED')}</AlertDescription>
+                <AlertDescription>{t('STORAGE_CAP_SERVER_RENAMES_REASON')}</AlertDescription>
               </Alert>
-            ) : null}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="path-template">{t('STORAGE_PATH_TEMPLATE')}</Label>
-              <Input
-                id="path-template"
-                value={pathTemplate}
-                onChange={(event) => setPathTemplate(event.target.value)}
-                placeholder="{Y}/{m}/{d}"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="file-template">{t('STORAGE_FILE_TEMPLATE')}</Label>
-              <Input
-                id="file-template"
-                value={fileTemplate}
-                onChange={(event) => setFileTemplate(event.target.value)}
-                placeholder="{uniqid}{extname}"
-              />
-            </div>
-
-            {/* 变量：点击即插入（避免用户手打错） */}
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">{t('STORAGE_TEMPLATE_VARS_TIP')}</Label>
-              <div className="flex flex-wrap gap-1">
-                {TEMPLATE_VARS.map((variable) => (
-                  <button
-                    key={variable}
-                    type="button"
-                    onClick={() => insertVar(variable, 'file')}
-                    className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title={t('STORAGE_TEMPLATE_INSERT_FILE')}
-                  >
-                    {variable}
-                  </button>
-                ))}
+            ) : config && !config.Capabilities.SupportsPathTemplate ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="file-template">{t('STORAGE_FILE_TEMPLATE')}</Label>
+                <Input
+                  id="file-template"
+                  value={fileTemplate}
+                  onChange={(event) => setFileTemplate(event.target.value)}
+                  placeholder="{uniqid}{extname}"
+                />
               </div>
-              <p className="text-xs text-muted-foreground">{t('STORAGE_TEMPLATE_VARS_HINT')}</p>
-            </div>
+            ) : (
+              <>
+                {/* 魔法文件名语义提示（AlertTitle 与图标同行） */}
+                <Alert variant="info">
+                  <Info aria-hidden />
+                  <AlertTitle>{t('STORAGE_FILE_TEMPLATE_NOTICE_TITLE')}</AlertTitle>
+                  <AlertDescription>{t('STORAGE_FILE_TEMPLATE_NOTICE_DESC')}</AlertDescription>
+                </Alert>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="path-template">{t('STORAGE_PATH_TEMPLATE')}</Label>
+                  <Input
+                    id="path-template"
+                    value={pathTemplate}
+                    onChange={(event) => setPathTemplate(event.target.value)}
+                    placeholder="{Y}/{m}/{d}"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="file-template">{t('STORAGE_FILE_TEMPLATE')}</Label>
+                  <Input
+                    id="file-template"
+                    value={fileTemplate}
+                    onChange={(event) => setFileTemplate(event.target.value)}
+                    placeholder="{uniqid}{extname}"
+                  />
+                </div>
+
+                {/* 变量：点击即插入（避免用户手打错） */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">{t('STORAGE_TEMPLATE_VARS_TIP')}</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {TEMPLATE_VARS.map((variable) => (
+                      <button
+                        key={variable}
+                        type="button"
+                        onClick={() => insertVar(variable, 'file')}
+                        className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title={t('STORAGE_TEMPLATE_INSERT_FILE')}
+                      >
+                        {variable}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('STORAGE_TEMPLATE_VARS_HINT')}</p>
+                </div>
+              </>
+            )}
           </section>
         </div>
 

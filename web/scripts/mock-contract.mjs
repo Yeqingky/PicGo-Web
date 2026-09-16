@@ -94,17 +94,6 @@ try {
     check('PATCH 改名走 AliasName（不改远端文件名）', r.Data.AliasName === '新名字' && r.Data.FileName === 'sample-2.jpg')
   }
 
-  console.log('--- 相册 §5 ---')
-  {
-    const r = call('get', '/albums')
-    check('Album 含 ImageCount/CoverURL/CoverUploadUID',
-      ['ImageCount','CoverURL','CoverUploadUID'].every((k) => k in r.Data.Items[0]))
-    const withImg = call('delete', '/albums/al_mock_wallpaper', { WithUploads: 'false' })
-    check('有图片的相册删除 → 40901（提示先移出）', withImg.Code === ApiCode.Conflict, JSON.stringify(withImg))
-    const empty = call('delete', '/albums/al_mock_docs')
-    check('空相册删除成功', empty.Code === 0)
-  }
-
   console.log('--- 任务 §8 ---')
   {
     const r = call('get', '/jobs', { Page: 1, PageSize: 10 })
@@ -134,7 +123,8 @@ try {
     const r = call('get', '/logs/types')
     check('类型是小写点分且原样（D81 例外）',
       r.Data.Types.some((t) => t.Type === 'upload') && r.Data.Types.some((t) => t.Type === 'theme.install'))
-    check('类型带 Label（中文展示名）', r.Data.Types.every((t) => typeof t.Label === 'string'))
+    check('类型只返回稳定值（不带本地化 Label）',
+      r.Data.Types.every((t) => typeof t.Type === 'string' && !('Label' in t)))
   }
   {
     const r = call('get', '/logs', { Page: 1, PageSize: 5, Status: 'failed' })

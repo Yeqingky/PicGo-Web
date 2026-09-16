@@ -257,7 +257,6 @@ func run() error {
 		Tokens:     app.TokenSvc,
 		Uploads:    biz.Upload,
 		Gallery:    biz.Gallery,
-		Albums:     biz.Album,
 		Storage:    biz.Storage,
 		Users:      app.UserRepo,
 		TokenRepo:  repository.NewTokenRepo(db.DB),
@@ -295,6 +294,12 @@ func run() error {
 		EventsURL: agentClient.EventsURL(),
 		Token:     agentClient.Token(),
 	}, hub, log).Run(runCtx)
+
+	// agent 的插件类任务只在 agent 内存持有执行期状态（重启即丢），
+	// 而前端任务面板查的是 Go 的 Jobs/JobLogs 表 —— 由投影器把
+	// agent 事件落库并周期对账，否则插件任务详情一直报「加载任务失败」、
+	// 事件丢失时会永久卡在「进行中」。
+	go service.NewAgentJobProjector(repository.NewJobRepo(db.DB), agentClient, log).Run(runCtx, hub)
 
 	// ---- 14. 存储配置 reconcile（以 DB 为真相源投影到 agent，D22）----
 	if err := biz.Storage.Reconcile(runCtx); err != nil {

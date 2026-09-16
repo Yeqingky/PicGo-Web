@@ -31,8 +31,8 @@ const (
 
 // UserView 是用户的对外视图（Users + UserProfiles 合并，见 API.md §2）。
 //
-// ImageCount / AlbumCount 是**实时统计**而非冗余列：
-// DATA-MODEL 未给 Users 加这两个计数列（D77「只增不删」而不是「随手加列」），
+// ImageCount 是**实时统计**而非冗余列：
+// DATA-MODEL 未给 Users 加这个计数列（D77「只增不删」而不是「随手加列」），
 // 所以按需聚合查询即可。
 type UserView struct {
 	UID                string `json:"UID"`
@@ -46,7 +46,6 @@ type UserView struct {
 	CapacityBytes      int64  `json:"CapacityBytes"` // 0 = 不限额
 	UsedBytes          int64  `json:"UsedBytes"`
 	ImageCount         int64  `json:"ImageCount"`
-	AlbumCount         int64  `json:"AlbumCount"`
 	HasPassword        bool   `json:"HasPassword"`
 	LastLoginAt        int64  `json:"LastLoginAt"`
 	CreatedAt          int64  `json:"CreatedAt"`
@@ -120,12 +119,16 @@ type LoginResult struct {
 	User *model.User
 }
 
-// Login 校验邮箱密码并处理登录限流与审计（D24 / D30 / D45）。
+// Login 校验邮箱密码并处理登录限流与审计（D24 / D30）。
 //
 // 返回的错误码：
 //   - 40101 凭据错误（**不区分**邮箱不存在与密码错误，防枚举）
 //   - 40104 账号被禁用
 //   - 42901 触发登录限流
+//
+// ⚠️ 凭据错误（含触发限流）**不再写 OperationLogs**：每次失败都落一条
+// 会把日志页刷爆（暴力枚举时尤甚）。失败计数仍在 `LoginAttempts`
+// 表（限流依据）；账号禁用的登录尝试仍留审计（需正确密码才能触达，量小）。
 func (s *UserService) Login(ctx context.Context, email, password, clientIP, userAgent string) (*LoginResult, error) {
 	normalized := normalizeEmail(email)
 	if normalized == "" || password == "" {
@@ -152,17 +155,7 @@ func (s *UserService) Login(ctx context.Context, email, password, clientIP, user
 	if failures >= maxAttempts {
 		// ⚠️ 被限流的请求**不写入 LoginAttempts**：
 		// 否则攻击者只要持续重试，窗口里就永远有新的失败记录，账号会被无限期锁死。
-		// 审计仍然记录，但走 OperationLogs（D45）。
-		s.audit.Log(ctx, AuditEntry{
-			Type:       model.LogTypeAuthFailed,
-			Status:     model.LogStatusFailed,
-			Username:   normalized,
-			TargetType: "user",
-			Detail:     map[string]any{"Reason": "rate_limited", "Failures": failures, "WindowMinutes": windowMinutes},
-			Cause:      NewError(response.CodeTooMany, ""),
-			ClientIP:   clientIP,
-			UserAgent:  userAgent,
-		})
+		// 也不写 OperationLogs（防刷爆，见函数注释）。
 		return nil, Errorf(response.CodeTooMany,
 			"登录失败次数过多，请 %d 分钟后再试", windowMinutes)
 	}
@@ -174,16 +167,6 @@ func (s *UserService) Login(ctx context.Context, email, password, clientIP, user
 			// 防枚举：先烧掉一次等价耗时，再记一次失败
 			auth.SpendDummyCompare(password)
 			s.recordAttempt(normalized, clientIP, userAgent, false)
-			s.audit.Log(ctx, AuditEntry{
-				Type:       model.LogTypeAuthFailed,
-				Status:     model.LogStatusFailed,
-				Username:   normalized,
-				TargetType: "user",
-				Detail:     map[string]any{"Reason": "unknown_email"},
-				Cause:      NewError(response.CodeBadCredentials, ""),
-				ClientIP:   clientIP,
-				UserAgent:  userAgent,
-			})
 			return nil, NewError(response.CodeBadCredentials, "")
 		}
 		return nil, Wrap(response.CodeInternal, "查询账号失败", err)
@@ -194,34 +177,10 @@ func (s *UserService) Login(ctx context.Context, email, password, clientIP, user
 	if user.PasswordHash == "" {
 		auth.SpendDummyCompare(password)
 		s.recordAttempt(normalized, clientIP, userAgent, false)
-		s.audit.Log(ctx, AuditEntry{
-			Type:       model.LogTypeAuthFailed,
-			Status:     model.LogStatusFailed,
-			UserUID:    user.UID,
-			Username:   normalized,
-			TargetType: "user",
-			TargetUID:  user.UID,
-			Detail:     map[string]any{"Reason": "no_password_set"},
-			Cause:      NewError(response.CodeBadCredentials, ""),
-			ClientIP:   clientIP,
-			UserAgent:  userAgent,
-		})
 		return nil, NewError(response.CodeBadCredentials, "")
 	}
 	if !auth.VerifyPassword(user.PasswordHash, password) {
 		s.recordAttempt(normalized, clientIP, userAgent, false)
-		s.audit.Log(ctx, AuditEntry{
-			Type:       model.LogTypeAuthFailed,
-			Status:     model.LogStatusFailed,
-			UserUID:    user.UID,
-			Username:   normalized,
-			TargetType: "user",
-			TargetUID:  user.UID,
-			Detail:     map[string]any{"Reason": "bad_password"},
-			Cause:      NewError(response.CodeBadCredentials, ""),
-			ClientIP:   clientIP,
-			UserAgent:  userAgent,
-		})
 		return nil, NewError(response.CodeBadCredentials, "")
 	}
 
@@ -306,12 +265,8 @@ func (s *UserService) Get(uid string) (*UserView, error) {
 	if err != nil {
 		return nil, Wrap(response.CodeInternal, "统计图片数量失败", err)
 	}
-	albumCounts, err := s.users.CountAlbumsByUser([]string{uid})
-	if err != nil {
-		return nil, Wrap(response.CodeInternal, "统计相册数量失败", err)
-	}
 
-	v := toUserView(*u, profile, imageCount, albumCounts[uid])
+	v := toUserView(*u, profile, imageCount)
 	if v.UsedBytes == 0 {
 		// UsedBytes 是权威列（D20/D72）；仅在为 0 而实际有图片时用聚合值兜底，
 		// 避免历史数据未回填时前端显示 0。
@@ -353,10 +308,6 @@ func (s *UserService) List(f repository.UserListFilter) ([]UserView, int64, erro
 	if err != nil {
 		return nil, 0, Wrap(response.CodeInternal, "统计图片数量失败", err)
 	}
-	albumCounts, err := s.users.CountAlbumsByUser(uids)
-	if err != nil {
-		return nil, 0, Wrap(response.CodeInternal, "统计相册数量失败", err)
-	}
 
 	out := make([]UserView, 0, len(rows))
 	for _, r := range rows {
@@ -368,7 +319,7 @@ func (s *UserService) List(f repository.UserListFilter) ([]UserView, int64, erro
 		}
 		// 列表页不为每个用户跑 SUM(Size)（避免 N+1），直接展示 Users.UsedBytes
 		// —— 它是权威列，由上传/删除流程维护（D20/D72）。
-		out = append(out, toUserView(r, profilePtr, imageCounts[r.UID], albumCounts[r.UID]))
+		out = append(out, toUserView(r, profilePtr, imageCounts[r.UID]))
 	}
 	return out, total, nil
 }
@@ -806,7 +757,6 @@ func (s *UserService) Delete(ctx context.Context, targetUID, byUID, clientIP, us
 			"Email":          u.Email,
 			"DeletedUploads": stats.Uploads,
 			"FreedBytes":     stats.FreedBytes,
-			"Albums":         stats.Albums,
 			"Identities":     stats.Identities,
 			"Tokens":         stats.Tokens,
 			"RemoteDeletion": "not_attempted (agent 集成在 W4/W5)",
@@ -902,7 +852,7 @@ func (s *UserService) auditAs(ctx context.Context, operatorUID string, e AuditEn
 	s.audit.Log(ctx, e)
 }
 
-func toUserView(u model.User, p *model.UserProfile, imageCount, albumCount int64) UserView {
+func toUserView(u model.User, p *model.UserProfile, imageCount int64) UserView {
 	v := UserView{
 		UID:                u.UID,
 		Email:              u.Email,
@@ -912,7 +862,6 @@ func toUserView(u model.User, p *model.UserProfile, imageCount, albumCount int64
 		CapacityBytes:      u.CapacityBytes,
 		UsedBytes:          u.UsedBytes,
 		ImageCount:         imageCount,
-		AlbumCount:         albumCount,
 		HasPassword:        u.PasswordHash != "",
 		LastLoginAt:        u.LastLoginAt,
 		CreatedAt:          u.CreatedAt,

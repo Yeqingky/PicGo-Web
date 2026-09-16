@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react'
+
 import en from '@/i18n/locales/en.json'
 import zhCN from '@/i18n/locales/zh-CN.json'
 
@@ -38,10 +40,26 @@ function readLocale(): Locale {
 }
 
 let currentLocale: Locale = readLocale()
+const localeListeners = new Set<() => void>()
+
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = currentLocale
+}
 
 /** 当前语言。 */
 export function getLocale(): Locale {
   return currentLocale
+}
+
+/** 订阅语言变化，供 React 组件在切换后刷新文案。 */
+export function subscribeLocale(listener: () => void): () => void {
+  localeListeners.add(listener)
+  return () => localeListeners.delete(listener)
+}
+
+/** React 组件使用的当前语言订阅。 */
+export function useLocale(): Locale {
+  return useSyncExternalStore(subscribeLocale, getLocale, getLocale)
 }
 
 /** 切换语言（仅影响 i18n key 的解析；后端 Message 不参与）。 */
@@ -55,13 +73,16 @@ export function setLocale(locale: Locale): void {
   if (typeof document !== 'undefined') {
     document.documentElement.lang = locale
   }
+  for (const listener of localeListeners) {
+    listener()
+  }
 }
 
-/** 可用语言列表（供设置页展示）。 */
+/** 可用语言列表（供顶栏和设置页展示）。 */
 export function availableLocales(): { value: Locale; label: string }[] {
   return [
-    { value: 'zh-CN', label: '简体中文' },
-    { value: 'en', label: 'English' },
+    { value: 'zh-CN', label: t('LANGUAGE_ZH_CN') },
+    { value: 'en', label: t('LANGUAGE_EN') },
   ]
 }
 

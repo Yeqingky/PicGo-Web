@@ -9,9 +9,13 @@
  *
  * 职责：
  *  - 指数退避重连（1s → 2s → 4s → 8s，上限 30s）
+ *  - 重连前用 `/auth/me` 校验会话，让过期的 `pcw_at` 通过 HTTP 客户端使用 `pcw_rt` 刷新
  *  - 按事件名订阅/退订
- *  - 连接状态回调（供 UI 显示「连接已断开，正在重连…」）
+ *  - 连接状态回调（供侧栏底部显示服务器在线 / 离线状态）
  */
+
+import { get } from '@/lib/http'
+import { toApiError } from '@/types/api'
 
 export const SSE_URL = '/api/web/v1/events'
 
@@ -185,8 +189,33 @@ export class SSEClient {
 
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
-      this.connect()
+      void this.reconnect()
     }, delay)
+  }
+
+  /**
+   * EventSource 的 error 事件不会暴露 HTTP 状态码。
+   * 重连前先请求一个普通鉴权接口：若 access token 过期，Axios 拦截器会
+   * 用 refresh token 静默刷新；网络不可用时则继续让 EventSource 自己重连。
+   */
+  private async reconnect(): Promise<void> {
+    if (this.closedByUser) return
+
+    try {
+      await get<unknown>('/auth/me', { timeout: 5_000 })
+    } catch (error) {
+      if (this.closedByUser) return
+
+      const apiError = toApiError(error)
+      if (apiError.isAuthError || apiError.HttpStatus === 401) {
+        // HTTP 客户端已经完成刷新尝试并通知登录态；继续重连只会制造请求风暴。
+        this.close()
+        return
+      }
+      // 断网或服务重启：不要把一次探测失败误判为登出，继续建立 SSE。
+    }
+
+    if (!this.closedByUser) this.connect()
   }
 
   private setStatus(status: SSEStatus, extra?: Omit<SSEStatusChange, 'status'>): void {

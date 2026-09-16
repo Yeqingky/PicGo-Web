@@ -19,7 +19,7 @@ export {
 } from '@/hooks/api/use-storage'
 
 // ---- 图库与相册（API.md §4 / §5）----
-export { useGalleryUploads, useUploadDetail, useUploadStats, useAlbums } from '@/hooks/api/use-gallery'
+export { useGalleryUploads, useUploadDetail, useUploadStats } from '@/hooks/api/use-gallery'
 
 // ---- 任务（API.md §8）----
 export { useJobs, useJobDetail, useJobLogs } from '@/hooks/api/use-jobs'

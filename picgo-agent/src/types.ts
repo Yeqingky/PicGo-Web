@@ -116,6 +116,12 @@ export interface Capabilities {
   SupportsPathTemplate: boolean
   /** 该驱动是否支持远端删除（走 `remove` 事件约定，D47）。 */
   SupportsRemoteDelete: boolean
+  /**
+   * 该图床是否无视传入文件名（服务端自行命名，如 NodeImage）。
+   * picgo 协议不声明此项；由 Go 侧在上传成功后对比 URL 文件名与期望名
+   * 运行时回写（初始 false，一旦探测到即置 true 并不再回退）。
+   */
+  ServerRenames: boolean
   /** 该驱动的配置字段名（原样，如 repo/token/path）。 */
   ConfigFields: string[]
   /** 命中的路径类字段名。 */
@@ -176,6 +182,11 @@ export interface UploaderTestData {
   Message: string
   LatencyMs: number
   Detail?: string
+  /**
+   * 实际发送的文件名（魔法钩子处理后的 `fileName`）。
+   * 供 Go 侧与返回 URL 的文件名对比，运行时探测「服务端改名」型图床。
+   */
+  FileName?: string
 }
 
 export interface UploaderConfigsListData {

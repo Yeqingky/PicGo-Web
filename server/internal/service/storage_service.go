@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -616,6 +618,13 @@ func (s *StorageService) Test(ctx context.Context, uid, by, clientIP, userAgent 
 		if data.Detail != "" && !data.Ok {
 			result.Message = data.Message + "：" + data.Detail
 		}
+		// 测试是**真上传探针图** —— 顺手完成「服务端改名」探测（与上传同一套
+		// 对比逻辑）：URL 文件名 ≠ 实际发送的文件名 ⇒ 该图床无视魔法文件名。
+		// 这样管理员点一次「测试连通性」就能看到能力徽章/表单降级，
+		// 不必等第一次真实上传。
+		if data.Ok {
+			s.MarkServerRenameDetected(uid, data.FileName, data.Detail)
+		}
 	}
 
 	status := model.LogStatusSuccess
@@ -647,6 +656,75 @@ type UploadTarget struct {
 	// SupportsPathTemplate 驱动是否支持自定义远端路径；
 	// false 时 agent 会把路径降级为文件名前缀（D44）。
 	SupportsPathTemplate bool
+}
+
+// CapabilitiesOf 返回某存储配置的能力（读取当前缓存；不存在时报错）。
+// 供测试与未来的只读场景使用；避免暴露内部 repo。
+func (s *StorageService) CapabilitiesOf(uid string) (agent.Capabilities, error) {
+	row, err := s.repo.FindByUID(uid)
+	if err != nil {
+		return agent.Capabilities{}, err
+	}
+	return parseCapabilities(row.Capabilities), nil
+}
+
+// MarkServerRenameDetected 运行时探测「服务端改名」并回写（PicList 同款）。
+//
+// picgo 协议不声明驱动是否尊重传入文件名，只能实测：上传成功后对比
+// 返回 URL 的文件名与期望名（忽略扩展名与路径结构）。不一致 ⇒ 该图床
+// 无视魔法文件名（如 NodeImage 强制短链 ID），置位 Capabilities.ServerRenames
+// （D77 运行时探测）。幂等：已置位时不重复写；存储不存在时静默忽略。
+// 返回是否发生了置位（仅供测试断言）。
+func (s *StorageService) MarkServerRenameDetected(storageUID, expectedFileName, url string) bool {
+	if url == "" || expectedFileName == "" || storageUID == "" {
+		return false
+	}
+	if urlFileName(url) == "" {
+		return false // URL 无文件名（无法对比，不判定）
+	}
+	if stripExt(urlFileName(url)) == stripExt(expectedFileName) {
+		return false // 一致：尊重传入名
+	}
+
+	row, err := s.repo.FindByUID(storageUID)
+	if err != nil {
+		return false // 不存在 / 查询失败：静默忽略
+	}
+	caps := parseCapabilities(row.Capabilities)
+	if caps.ServerRenames {
+		return false // 已置位（幂等）
+	}
+	caps.ServerRenames = true
+	caps.DetectedAt = model.Now()
+	raw, err := json.Marshal(caps)
+	if err != nil {
+		return false
+	}
+	if err := s.repo.UpdateFields(storageUID, map[string]any{"Capabilities": string(raw)}); err != nil {
+		s.log.Debug("回写服务端改名探测结果失败", "storage", storageUID, "err", err)
+		return false
+	}
+	return true
+}
+
+// urlFileName 从 URL 中取出最后一个路径段的文件名（已去查询串/锚点）。
+func urlFileName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Path == "" || u.Path == "/" {
+		return ""
+	}
+	return path.Base(u.Path)
+}
+
+// stripExt 去掉扩展名（保留主体）。
+//
+// 点开头的隐藏文件（如 `.hidden`）没有扩展名语义，原样返回 ——
+// 否则 url 为 `https://x/.hidden` 这类场景会误判。
+func stripExt(name string) string {
+	if strings.HasPrefix(name, ".") && !strings.Contains(name[1:], ".") {
+		return name
+	}
+	return strings.TrimSuffix(name, path.Ext(name))
 }
 
 // ResolveUploadTarget 把 StorageUID 解析成上传所需的目标快照。

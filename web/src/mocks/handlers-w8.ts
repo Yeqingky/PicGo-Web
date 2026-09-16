@@ -186,7 +186,6 @@ let uploads = Array.from({ length: 57 }, (_, index) => {
     UID: `up_mock_${String(index + 1).padStart(3, '0')}`,
     UserUID: 'usr_mock_admin',
     StorageUID: storage.UID,
-    AlbumUID: index % 3 === 0 ? 'al_mock_wallpaper' : '',
     FileName: `sample-${index + 1}.${ext}`,
     OriginalName: `IMG_${1000 + index}.${ext}`,
     AliasName: index % 7 === 0 ? `封面图 ${index + 1}` : '',
@@ -210,37 +209,6 @@ let uploads = Array.from({ length: 57 }, (_, index) => {
     UpdatedAt: now() - index * 3600,
   }
 })
-
-let albums = [
-  {
-    UID: 'al_mock_wallpaper',
-    UserUID: 'usr_mock_admin',
-    ParentUID: '',
-    Name: '壁纸',
-    Intro: '桌面壁纸合集',
-    CoverUploadUID: 'up_mock_001',
-    CoverURL: 'https://picsum.photos/seed/picgo-web-0/1200/800',
-    ImageCount: 19,
-    SortOrder: 0,
-    Metadata: {},
-    CreatedAt: now() - 86400 * 5,
-    UpdatedAt: now() - 3600,
-  },
-  {
-    UID: 'al_mock_docs',
-    UserUID: 'usr_mock_admin',
-    ParentUID: '',
-    Name: '文档配图',
-    Intro: '',
-    CoverUploadUID: '',
-    CoverURL: '',
-    ImageCount: 0,
-    SortOrder: 1,
-    Metadata: {},
-    CreatedAt: now() - 86400 * 2,
-    UpdatedAt: now() - 86400 * 2,
-  },
-]
 
 const JOBS = [
   {
@@ -330,26 +298,31 @@ const JOB_LOGS: Record<string, { Seq: number; Line: string; CreatedAt: number }[
 }
 
 const LOG_TYPES = [
-  { Type: 'upload', Label: '上传', TargetType: 'upload' },
-  { Type: 'image.delete', Label: '删除图片', TargetType: 'upload' },
-  { Type: 'image.update', Label: '整理图片', TargetType: 'upload' },
-  { Type: 'mail.send', Label: '邮件发送', TargetType: 'email' },
-  { Type: 'user.create', Label: '账号创建', TargetType: 'user' },
-  { Type: 'user.delete', Label: '账号注销', TargetType: 'user' },
-  { Type: 'user.update', Label: '账号修改', TargetType: 'user' },
-  { Type: 'storage.create', Label: '新建存储', TargetType: 'storage' },
-  { Type: 'storage.update', Label: '修改存储', TargetType: 'storage' },
-  { Type: 'storage.delete', Label: '删除存储', TargetType: 'storage' },
-  { Type: 'plugin.install', Label: '安装插件', TargetType: 'plugin' },
-  { Type: 'plugin.uninstall', Label: '卸载插件', TargetType: 'plugin' },
-  { Type: 'plugin.update', Label: '更新插件', TargetType: 'plugin' },
-  { Type: 'auth.login', Label: '登录', TargetType: 'user' },
-  { Type: 'auth.failed', Label: '登录失败', TargetType: 'user' },
-  { Type: 'auth.logout', Label: '登出', TargetType: 'user' },
-  { Type: 'setting.update', Label: '修改设置', TargetType: 'setting' },
-  { Type: 'theme.install', Label: '安装主题', TargetType: 'theme' },
-  { Type: 'theme.activate', Label: '启用主题', TargetType: 'theme' },
-  { Type: 'system.log.cleanup', Label: '日志清理', TargetType: '' },
+  { Type: 'upload', TargetType: 'upload' },
+  { Type: 'image.delete', TargetType: 'upload' },
+  { Type: 'image.update', TargetType: 'upload' },
+  { Type: 'mail.send', TargetType: 'email' },
+  { Type: 'user.create', TargetType: 'user' },
+  { Type: 'user.delete', TargetType: 'user' },
+  { Type: 'user.update', TargetType: 'user' },
+  { Type: 'storage.create', TargetType: 'storage' },
+  { Type: 'storage.update', TargetType: 'storage' },
+  { Type: 'storage.delete', TargetType: 'storage' },
+  { Type: 'plugin.install', TargetType: 'plugin' },
+  { Type: 'plugin.uninstall', TargetType: 'plugin' },
+  { Type: 'plugin.update', TargetType: 'plugin' },
+  { Type: 'auth.login', TargetType: 'user' },
+  { Type: 'auth.failed', TargetType: 'user' },
+  { Type: 'auth.logout', TargetType: 'user' },
+  { Type: 'setting.update', TargetType: 'setting' },
+  { Type: 'system.log.cleanup', TargetType: '' },
+  { Type: 'theme.install', TargetType: 'theme' },
+  { Type: 'theme.uninstall', TargetType: 'theme' },
+  { Type: 'theme.activate', TargetType: 'theme' },
+  { Type: 'theme.rescan', TargetType: 'theme' },
+  { Type: 'theme.settings.update', TargetType: 'theme' },
+  { Type: 'theme.settings.clear', TargetType: 'theme' },
+  { Type: 'theme.error', TargetType: 'theme' },
 ]
 
 const operationLogs = Array.from({ length: 73 }, (_, index) => {
@@ -1045,7 +1018,6 @@ export function handleW8(
   if (method === 'get' && path === '/uploads') {
     const keyword = paramOf(config, 'Keyword').toLowerCase()
     const storageUID = paramOf(config, 'StorageUID')
-    const albumUID = paramOf(config, 'AlbumUID')
     const status = paramOf(config, 'Status')
     const scope = paramOf(config, 'Scope') || 'mine'
     const sort = paramOf(config, 'Sort') || 'CreatedAt'
@@ -1061,8 +1033,6 @@ export function handleW8(
       )
     }
     if (storageUID) list = list.filter((item) => item.StorageUID === storageUID)
-    if (albumUID === 'none') list = list.filter((item) => !item.AlbumUID)
-    else if (albumUID) list = list.filter((item) => item.AlbumUID === albumUID)
     if (status) list = list.filter((item) => item.Status === status)
 
     list.sort((a, b) => {
@@ -1098,6 +1068,63 @@ export function handleW8(
       ByExtension: ['png', 'jpg', 'gif', 'webp'].map((ext) => ({
         Extension: ext,
         Count: uploads.filter((item) => item.Extension === ext).length,
+      })),
+    })
+  }
+
+  // ---------------- 仪表盘统计（API.md §10）----------------
+  if (method === 'get' && path === '/system/stats') {
+    const two = (value: number) => String(value).padStart(2, '0')
+    const dayKeyOf = (date: Date) =>
+      `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`
+
+    const perDay = new Map<string, { count: number; size: number }>()
+    for (const item of uploads) {
+      const key = dayKeyOf(new Date(item.CreatedAt * 1000))
+      const bucket = perDay.get(key) ?? { count: 0, size: 0 }
+      bucket.count += 1
+      bucket.size += item.Size
+      perDay.set(key, bucket)
+    }
+
+    // mock 的 uploads 只覆盖最近两天；其余日期造一个确定性序列，
+    // 否则 30 天趋势图只有两根柱子，看不出图表是否正确
+    const trend = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (29 - index))
+      const key = dayKeyOf(date)
+      const hit = perDay.get(key)
+      const fallback = (index * 5 + 3) % 11
+      return {
+        Date: key,
+        Count: hit?.count ?? fallback,
+        Size: hit?.size ?? fallback * 524_288,
+      }
+    })
+
+    const todayKey = dayKeyOf(new Date())
+
+    return ok(config, {
+      Scope: 'all',
+      // ⚠️ 真实后端只给**管理员**返回 Users / ByStorage；
+      //    mock 不区分角色（页面按 auth-store 的 Role 决定是否渲染）
+      Users: { Total: 3, Active: 2, Disabled: 1, Admins: 1 },
+      Uploads: {
+        Total: uploads.length,
+        TotalSize: uploads.reduce((acc, item) => acc + item.Size, 0),
+        TodayCount: perDay.get(todayKey)?.count ?? 0,
+        PendingCount: uploads.filter((item) => item.Status === 'pending').length,
+        FailedCount: uploads.filter((item) => item.Status === 'failed').length,
+      },
+      Jobs: {
+        Running: JOBS.filter((item) => item.Status === 'running').length,
+        Queued: JOBS.filter((item) => item.Status === 'queued').length,
+      },
+      Trend: trend,
+      ByStorage: storageConfigs.map((item) => ({
+        StorageUID: item.UID,
+        Name: item.Name,
+        Count: uploads.filter((upload) => upload.StorageUID === item.UID).length,
       })),
     })
   }
@@ -1143,86 +1170,6 @@ export function handleW8(
             : `![${name}](${target.URL})`
 
       return ok(config, { UID: target.UID, Format: format, Text: text, URL: target.URL })
-    }
-  }
-
-  // ---------------- 相册（API.md §5） ----------------
-  if (method === 'get' && path === '/albums') {
-    const keyword = paramOf(config, 'Keyword').toLowerCase()
-    const list = keyword ? albums.filter((item) => item.Name.toLowerCase().includes(keyword)) : albums
-    return ok(config, { Items: list })
-  }
-
-  if (method === 'post' && path === '/albums') {
-    const name = String(body.Name ?? '').trim()
-    if (albums.some((item) => item.Name === name)) {
-      return fail(config, ApiCode.Conflict, '同名相册已存在', 409)
-    }
-    const created = {
-      UID: `al_mock_${Date.now().toString(36)}`,
-      UserUID: 'usr_mock_admin',
-      ParentUID: '',
-      Name: name,
-      Intro: String(body.Intro ?? ''),
-      CoverUploadUID: '',
-      CoverURL: '',
-      ImageCount: 0,
-      SortOrder: albums.length,
-      Metadata: {},
-      CreatedAt: now(),
-      UpdatedAt: now(),
-    }
-    albums = [...albums, created]
-    return ok(config, created)
-  }
-
-  if (method === 'post' && path === '/albums/move-uploads') {
-    const uids = (body.UploadUIDs as string[]) ?? []
-    const targetUID = String(body.TargetAlbumUID ?? '')
-    let moved = 0
-
-    uploads = uploads.map((item) => {
-      if (!uids.includes(item.UID)) return item
-      moved += 1
-      return { ...item, AlbumUID: targetUID, UpdatedAt: now() }
-    })
-
-    return ok(config, { Moved: moved, Skipped: uids.length - moved })
-  }
-
-  {
-    const params = match(path, '/albums/{uid}')
-    if (params) {
-      const index = albums.findIndex((item) => item.UID === params.uid)
-
-      if (method === 'get' && index >= 0) return ok(config, albums[index])
-
-      if (method === 'patch' && index >= 0) {
-        albums[index] = { ...albums[index], ...(body as object), UpdatedAt: now() }
-        return ok(config, albums[index])
-      }
-
-      if (method === 'delete' && index >= 0) {
-        const album = albums[index]
-        // 有图片且未显式要求时拒绝（D: 相册删除语义）
-        if (album.ImageCount > 0 && paramOf(config, 'WithUploads') !== 'true') {
-          return fail(config, ApiCode.Conflict, `相册内有 ${album.ImageCount} 张图片，请先移出`, 409)
-        }
-        albums.splice(index, 1)
-        return ok(config, { Deleted: true, DetachedUploads: 0 })
-      }
-    }
-
-    const move = match(path, '/albums/{uid}/move-uploads')
-    if (method === 'post' && move) {
-      const uids = (body.UploadUIDs as string[]) ?? []
-      let moved = 0
-      uploads = uploads.map((item) => {
-        if (!uids.includes(item.UID)) return item
-        moved += 1
-        return { ...item, AlbumUID: move.uid, UpdatedAt: now() }
-      })
-      return ok(config, { Moved: moved, Skipped: uids.length - moved })
     }
   }
 

@@ -35,6 +35,8 @@ export interface LinkCopyMenuProps {
   items: LinkFormatInput[]
   /** 按钮文案（缺省「复制链接」） */
   label?: string
+  /** 仅显示复制图标，仍保留 aria-label 与 title。 */
+  iconOnly?: boolean
   variant?: ButtonProps['variant']
   size?: ButtonProps['size']
   className?: string
@@ -44,6 +46,7 @@ export interface LinkCopyMenuProps {
 export function LinkCopyMenu({
   items,
   label,
+  iconOnly = false,
   variant = 'outline',
   size = 'sm',
   className,
@@ -68,6 +71,7 @@ export function LinkCopyMenu({
   }
 
   const disabledNow = disabled || items.length === 0
+  const buttonLabel = label ?? t('LINK_COPY_LABEL')
 
   return (
     <DropdownMenu>
@@ -78,13 +82,15 @@ export function LinkCopyMenu({
           size={size}
           className={className}
           disabled={disabledNow || busy}
+          aria-label={buttonLabel}
+          title={iconOnly ? buttonLabel : undefined}
         >
           {busy ? (
             <Loader2 className="size-4 animate-spin" aria-hidden />
           ) : (
             <Copy aria-hidden />
           )}
-          {label ?? t('LINK_COPY_LABEL')}
+          {iconOnly ? null : buttonLabel}
         </Button>
       </DropdownMenuTrigger>
 

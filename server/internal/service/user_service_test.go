@@ -67,9 +67,9 @@ func TestLoginAntiEnumeration(t *testing.T) {
 		}
 	}
 
-	// 两种失败都要落 auth.failed
-	if n := env.logCount(t, model.LogTypeAuthFailed); n != 2 {
-		t.Errorf("auth.failed 日志应为 2 条，实际 %d", n)
+	// 凭据错误不再写 OperationLogs（防刷爆）；限流计数仍在 LoginAttempts
+	if n := env.logCount(t, model.LogTypeAuthFailed); n != 0 {
+		t.Errorf("凭据错误不应写 auth.failed 日志，实际 %d 条", n)
 	}
 }
 
@@ -119,10 +119,10 @@ func TestLoginRateLimit(t *testing.T) {
 		t.Errorf("被限流的请求不应写入 LoginAttempts：期望 3 条，实际 %d", attempts)
 	}
 
-	// 但审计要留下痕迹：3 次计数内失败 + 1 次被限流拒绝 = 4 条 auth.failed
-	// （被限流的请求不写 LoginAttempts，但**要**写 OperationLogs，否则锁定期无据可查）
-	if n := env.logCount(t, model.LogTypeAuthFailed); n != 4 {
-		t.Errorf("auth.failed 应为 4 条（3 次失败 + 1 次限流），实际 %d", n)
+	// 凭据错误与限流拒绝都不再写 OperationLogs（防刷爆）；
+	// 限流依据只看 LoginAttempts（上面已断言）
+	if n := env.logCount(t, model.LogTypeAuthFailed); n != 0 {
+		t.Errorf("登录失败不应写 auth.failed 日志，实际 %d 条", n)
 	}
 
 	// 换一个 IP 不受影响（限流按 Email + IP）
@@ -417,11 +417,6 @@ func TestDeletePurgesRelatedRows(t *testing.T) {
 	if _, err := env.tokenSvc.CreateAPIToken(context.Background(), target.UID, "ci", 0, testIP, "pytest"); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.db.Create(&model.Album{
-		UID: "al_1", UserUID: target.UID, Name: "默认", CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
 	if err := env.db.Create(&model.Upload{
 		UID: "up_1", UserUID: target.UID, StorageUID: "st_1", FileName: "a.png",
 		Size: 2048, Status: model.UploadStatusSuccess, Source: model.UploadSourceWeb,
@@ -455,7 +450,6 @@ func TestDeletePurgesRelatedRows(t *testing.T) {
 		{"OAuthIdentities", &model.OAuthIdentity{}},
 		{"RefreshTokens", &model.RefreshToken{}},
 		{"APITokens", &model.APIToken{}},
-		{"Albums", &model.Album{}},
 		{"Uploads", &model.Upload{}},
 	}
 	for _, c := range checks {

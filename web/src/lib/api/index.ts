@@ -193,7 +193,7 @@ export const siteApi = {
 // 按域重导出（DESIGN.md §14.1）
 // ---------------------------------------------------------------------------
 
-export { albumApi, uploadApi, type UploadFilesInput } from '@/lib/api/gallery'
+export { uploadApi, type UploadFilesInput } from '@/lib/api/gallery'
 export { jobApi } from '@/lib/api/job'
 export { logApi } from '@/lib/api/log'
 export { pluginApi } from '@/lib/api/plugin'
@@ -201,7 +201,7 @@ export { settingsApi, systemApi } from '@/lib/api/setting'
 export { storageApi, fetchDefaultStorageConfig, type StorageConfigListParams } from '@/lib/api/storage'
 export { themeApi } from '@/lib/api/theme'
 
-import { albumApi, uploadApi } from '@/lib/api/gallery'
+import { uploadApi } from '@/lib/api/gallery'
 import { jobApi } from '@/lib/api/job'
 import { logApi } from '@/lib/api/log'
 import { pluginApi } from '@/lib/api/plugin'
@@ -219,7 +219,6 @@ export const api = {
   system: systemApi,
   storage: storageApi,
   upload: uploadApi,
-  album: albumApi,
   job: jobApi,
   log: logApi,
   plugin: pluginApi,

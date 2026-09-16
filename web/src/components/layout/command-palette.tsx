@@ -35,7 +35,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const isAdmin = useAuthStore((state) => state.user?.Role === 'admin')
 
   const [query, setQuery] = useState('')
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(-1)
 
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = []
@@ -69,13 +69,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   useEffect(() => {
     if (open) {
       setQuery('')
-      setActiveIndex(0)
+      setActiveIndex(-1)
     }
   }, [open])
 
   // 过滤结果变化后修正选中项，避免越界
   useEffect(() => {
-    setActiveIndex((prev) => (prev >= filtered.length ? 0 : prev))
+    setActiveIndex((prev) =>
+      filtered.length === 0 || prev >= filtered.length ? -1 : prev,
+    )
   }, [filtered.length])
 
   const run = (command: Command | undefined) => {
@@ -87,11 +89,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setActiveIndex((prev) => (filtered.length === 0 ? 0 : (prev + 1) % filtered.length))
+      setActiveIndex((prev) =>
+        filtered.length === 0 ? -1 : prev < 0 ? 0 : (prev + 1) % filtered.length,
+      )
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       setActiveIndex((prev) =>
-        filtered.length === 0 ? 0 : (prev - 1 + filtered.length) % filtered.length,
+        filtered.length === 0
+          ? -1
+          : prev < 0
+            ? filtered.length - 1
+            : (prev - 1 + filtered.length) % filtered.length,
       )
     } else if (event.key === 'Enter') {
       event.preventDefault()
@@ -101,7 +109,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[15%] max-w-lg translate-y-0 gap-0 p-0" aria-describedby={undefined}>
+      <DialogContent
+        className="top-[15%] max-w-lg translate-y-0 gap-0 rounded-lg p-0"
+        closeClassName="rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        aria-describedby={undefined}
+      >
         <DialogTitle className="sr-only">{t('TOPBAR_COMMAND_PALETTE')}</DialogTitle>
 
         <div className="border-b border-border px-3 py-2">
@@ -111,7 +123,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             onKeyDown={onKeyDown}
             placeholder={t('COMMAND_PALETTE_PLACEHOLDER')}
             autoFocus
-            className="border-0 px-0 shadow-none focus-visible:ring-0"
+            className="rounded-none border-0 px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             aria-label={t('COMMAND_PALETTE_PLACEHOLDER')}
           />
         </div>

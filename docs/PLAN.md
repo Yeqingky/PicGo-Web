@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `server/` | Go 1.25 + Gin 1.12 + GORM 1.31 | 鉴权、队列、配额、日志、REST/SSE、托管前端、Lsky 兼容 | D9–D12、D16–D17 |
 | `picgo-agent/` | Node 24 + TS + hono + `picgo@3.0.2` | 持有 **单个** `PicGo` 实例、上传、插件、驱动能力探测 | D6–D8、D15 |
-| `web/` | React 19 + TS + Vite 7 + Tailwind v4 + Radix + RR7 + Zustand + Axios | **内置 SPA**（图库 / 上传 / 相册 / 任务 / 日志 / 设置 / 后台 / 认证页）+ **默认首页主题**（独立构建单元） | D13–D14、**D94** |
+| `web/` | React 19 + TS + Vite 7 + Tailwind v4 + Radix + RR7 + Zustand + Axios | **内置 SPA**（图库 / 上传 / 任务 / 日志 / 设置 / 后台 / 认证页）+ **默认首页主题**（独立构建单元） | D13–D14、**D94** |
 | **`../PicGo-Core`（fork）** | TS + rollup | 上游 `picgo-core` 的**自有分支 `PicGo-Web`**，承载按次指定图床等补丁 | D48–D51 |
 
 **核心取舍（D2/D59）**：后端**不做存储、不做图片分发**。图片落在图床上，URL 由 PicGo 驱动决定，本项目只负责「元数据 + 管理 + 调度」。
@@ -36,7 +36,7 @@
 ```
 docker-compose.yml            面向用户的唯一部署入口（D76）
 docker-compose.pgsql.yml      可选覆盖：切 PostgreSQL
-deploy/docker/Dockerfile      多阶段构建（前端 → 默认主题 → PicGo-Core → agent → Go）
+根目录 `Dockerfile`      多阶段构建（前端 → 默认主题 → PicGo-Core → agent → Go）
 Makefile                      **只封装 docker compose**：dev / dev-* / up / up-pgsql / down / logs
                               / check-* / e2e-*（**不再有** build / server / agent / web / pack /
                               vendor / theme 这类宿主直跑目标，D76）
@@ -46,9 +46,9 @@ docs/                         九份开发文档（D79：README 索引 + 8 份�
 picgo-core 依赖               **npm 包 `@yeqingky/picgo-core`**（fork 的 PicGo-Web 分支，
                               版本线独立 1.x）；**不再需要本地源码或 vendor tarball**
 docker-compose.yml            生产（SQLite）；带 build 段，首次 up 自动构建镜像
-docker-compose-dev.yml        开发（三容器 + 热重载：web/server/agent + e2e profile）
-deploy/docker/Dockerfile      生产镜像（四阶段：前端 → 侧车 → Go → alpine 运行时）
-deploy/docker/Dockerfile.dev  开发镜像（agent-dev / server-dev / web-dev / e2e 四个 target）
+docker-compose-dev.yml        开发（三容器 + 热重载：web/server/agent + e2e profile；
+                              **直接用基础镜像跑源码，无 dev Dockerfile**）
+Dockerfile                    生产镜像（根目录；四阶段：前端 → 侧车 → Go → alpine 运行时）
 ```
 
 > ⚠️ **备份不在交付范围**（D82）：项目**不提供**数据库与配置的导出/导入功能（无界面、无端点、无定时备份任务）。
@@ -62,7 +62,7 @@ deploy/docker/Dockerfile.dev  开发镜像（agent-dev / server-dev / web-dev / 
 |---|---|---|
 | **M0 骨架** | 三个子项目各自可启动，工具链与门禁就绪 | ① `make check` 通过（允许空实现）；② `make dev-up` 后三容器起来（web:5173 / server:8080 / agent:36678）；③ `curl :8080/healthz` 返回 `status:ok` 且 `agent:"up"`；④ `/login` 能渲染登录页；⑤ `docker compose up -d --build` 成功；⑥ `curl /healthz` 通过 |
 | **M1 核心** | 端到端跑通 **登录 → 配驱动 → 上传 → 看到图 → 复制外链** | ① 首启生成 `data/initial-admin-password.txt`（0600），用该邮箱 + 密码登录成功并被强制改密（D32）；② 管理员新建一个存储配置（如 GitHub 或 WebDAV），凭据加密入库（`StorageSecrets`），响应中凭据为掩码；③ 点击「测试连通」返回 `Ok:true`；④ 拖拽上传 1 张图，`Jobs` 产生 1 条 `succeeded`，`JobItems` 1 条 `succeeded`；⑤ `Uploads` 出现 1 行且 `URL` 可在浏览器打开；⑥ 刷新图库列表能看到该图；⑦ 复制得到 Markdown / 直链 / HTML 三种格式（D68）；⑧ 管理员未配限流时上传不受限（D73 默认关闭）；⑨ **同一驱动类型可再建第二条配置**（如第二个 WebDAV），两条互不影响，各自可单独设为默认、可单独上传成功（D64）；⑩ 启动时 `StorageConfigs` → agent 的 reconcile 幂等：重启后 `config.json` 中被我们管的键与 DB 一致，且插件私有键（如 `uploaded`）未被破坏（D22）；⑪ **默认 `upload.concurrency=1` 时上传成功（不依赖内核补丁）**；把 `upload.concurrency` 改为 2 后，指定不同存储的两个批次**并发**提交，两次上传分别落到各自图床（验证 W0 补丁生效），再调回 1 仍成功（D35/D48–D51） |
-| **M2 完善** | 多用户 + 整理 + 插件 + 日志 + 删除 | ① 管理员建第二个用户，配额取 `user.defaultCapacityBytes`（D21），可单独调整；② 该用户登录后**只能看到自己的图**；③ 管理员在 `/images` 用顶部 Tab 切「我的图片 / 全部图片」（D71）；④ 相册 CRUD + 图片移入移出，`Albums.ImageCount` 一致；⑤ 上传触发限流时管理员**跳过**、普通用户被拒（开启限流后验证，D73）；⑥ 配额用尽时上传返 **`40302`**；⑦ 删除图片 → 记录消失 + `Users.UsedBytes` 退还（D72）+ 写 `image.delete` 日志；**开启远端删除时**（插件实现了 `remove`，如 `picgo-plugin-github-plus`）图床文件被真删，未实现的驱动只删本地并在 UI 标注（D46/D47）；⑧ 插件搜索 / 安装 / 卸载 / 更新 / 启停可用，安装过程 SSE 有 `job.log`；⑨ 操作日志页可按类型过滤 + 关键词搜索（D45）；⑩ 魔法路径与魔法文件名在存储配置里各自生效（D43/D70），不支持的驱动自动降级并给出提示（D44）；⑪ **首页主题可用**：首启 `data/themes/default/` 自动生成、`/` 可打开；`/gallery` 等仍由内置 SPA 渲染；主题资源走 `/theme-assets/**`、`/themes/**` 返 404；**改主题 manifest 的 `Pages` 加 `/gallery` → 重扫后 `/gallery` 改由主题渲染（Go 未改动）**；`Pages` 写 `["/login"]` → 校验失败且 `/login` 仍为内置 SPA；删掉 `data/themes/` 后 `/` 仍能打开（内嵌兜底）（D94/D96/D98/D99，完整 8 条见 W10 验收） |
+| **M2 完善** | 多用户 + 插件 + 日志 + 删除 | ① 管理员建第二个用户，配额取 `user.defaultCapacityBytes`（D21），可单独调整；② 该用户登录后**只能看到自己的图**；③ 管理员在 `/gallery` 用顶部 Tab 切「我的图片 / 全部图片」（D71）；④ 上传触发限流时管理员**跳过**、普通用户被拒（开启限流后验证，D73）；⑤ 配额用尽时上传返 **`40302`**；⑥ 删除图片 → 记录消失 + `Users.UsedBytes` 退还（D72）+ 写 `image.delete` 日志；**开启远端删除时**（插件实现了 `remove`，如 `picgo-plugin-github-plus`）图床文件被真删，未实现的驱动只删本地并在 UI 标注（D46/D47）；⑦ 插件搜索 / 安装 / 卸载 / 更新 / 启停可用，安装过程 SSE 有 `job.log`；⑧ 操作日志页可按类型过滤 + 关键词搜索（D45）；⑨ 魔法路径与魔法文件名在存储配置里各自生效（D43/D70），不支持的驱动自动降级并给出提示（D44）；⑩ **首页主题可用**：首启 `data/themes/default/` 自动生成、`/` 可打开；`/gallery` 等仍由内置 SPA 渲染；主题资源走 `/theme-assets/**`、`/themes/**` 返 404；**改主题 manifest 的 `Pages` 加 `/gallery` → 重扫后 `/gallery` 改由主题渲染（Go 未改动）**；`Pages` 写 `["/login"]` → 校验失败且 `/login` 仍为内置 SPA；删掉 `data/themes/` 后 `/` 仍能打开（内嵌兜底）（D94/D96/D98/D99，完整 8 条见 W10 验收） |
 | **M3 进阶** | Lsky 兼容 + 邮件 + API Token + OAuth + 一键部署 | ① 用 `picgo-plugin-lankong`（或等价客户端）把本服务当图床：`POST /api/v1/tokens` 换 token → `POST /api/v1/upload` 上传成功 → `GET /api/v1/images` 能列出 → `DELETE /api/v1/images/{key}` 能删（D52）；② 返回体为 Lsky 风格 `{status,message,data}`（**该层保持 snake_case，不受 D81 影响**）；③ SMTP 配置后发出邀请邮件，`EmailLogs` 有一行（**不含正文**）且 `OperationLogs` 有 `mail.send`（D29）；④ 找回密码全流程可用；⑤ 创建 API Token 后 `Authorization: Bearer pcw_xxx` 可调 `/api/web/v1/uploads`；⑥ GitHub OAuth **绑定**后可登录（未绑定则拒绝，D27）；⑦ `docker compose up -d` 全新环境 5 分钟内可用；⑧ `docker compose -f docker-compose.yml -f docker-compose.pgsql.yml up -d` 用 PgSQL 同样可用（D76）；⑨ **容器首启后首页主题开箱可用**：`./data/themes/default/` 自动种入、`/` 渲染默认首页主题；即使挂载卷里**没有** `themes/` 也能从二进制内嵌兜底打开（D94） |
 | **M4 打磨** | 体验与可维护性 | ① 暗色/亮色主题切换并持久化；② 图库批量选择 + 批量删除/移动；③ 上传队列面板支持逐文件进度与失败重试入口；④ SSE 断线自动重连且重连后状态自愈；⑤ 全部界面文案走 i18n key，`zh-CN` 完整（D75）；⑥ 操作日志保留清理任务按 `log.retentionDays=180` 生效，清理自身留痕（D74）；⑦ 服务端 SIGTERM 能优雅关闭并在下次启动恢复未完成任务（D41）；⑧ 文档与实现一致，`make check` 全绿 |
 
@@ -74,13 +74,13 @@ deploy/docker/Dockerfile.dev  开发镜像（agent-dev / server-dev / web-dev / 
 |---|---|---|---|---|---|
 | **W0** | **PicGo-Core fork 与补丁** | `../PicGo-Core`（分支 `PicGo-Web`） | 按次指定图床（`UploadOptions.uploader`）、事件归属（`contextData`）、per-context 配置覆盖、`Lifecycle.step` 并发修复；`FORK-NOTES.md`；单测 | 无 | —（已完成） |
 | **W1** | 契约与骨架 | `docs/`、仓库根 | **九份**文档定稿、目录骨架（含 `web/theme-default/`、`themes/`）、`Makefile`（含 `theme`/`check-theme`）、`.env.example`、`docker-compose*.yml`、`.gitignore` | W0（文档需反映补丁现状） | 否（最先） |
-| **W2** | Go 基础设施 | `server/internal/{config,logger,database,model,repository,crypto,id,settings,response,middleware}` | 双方言 DB + 只增迁移 + **21 张表模型**（含 `ThemeConfigs`，D95） + 仓库层 + AES + ULID + KV 配置服务 + 统一响应 | W1 | ✅ 与 W4/W7 并行 |
+| **W2** | Go 基础设施 | `server/internal/{config,logger,database,model,repository,crypto,id,settings,response,middleware}` | 双方言 DB + 只增迁移 + **20 张表模型**（含 `ThemeConfigs`，D95；相册表已于 D101 移除） + 仓库层 + AES + ULID + KV 配置服务 + 统一响应 | W1 | ✅ 与 W4/W7 并行 |
 | **W3** | Go 鉴权与用户 | `server/internal/{auth,service,handler}` | 邮箱密码登录、JWT + refresh、API Token、登录限流、GitHub OAuth 绑定、用户 CRUD、首启引导 | W2 | ✅ |
 | **W4** | Agent 内核 | `picgo-agent/` | picgo-core 宿主：单文件同步上传、驱动能力探测、插件全生命周期、jobs/SSE、远端删除、优雅退出 | W0、W1 | ✅ 与 W2/W7 并行 |
-| **W5** | Go 业务核心 | `server/internal/{agent,events,service,handler}` | 上传队列（job/item）、配额、限流、存储同步与 reconcile、图库、相册、插件代理、SSE Hub | W2、W4 | ⚠️ 依赖 W2 |
+| **W5** | Go 业务核心 | `server/internal/{agent,events,service,handler}` | 上传队列（job/item）、配额、限流、存储同步与 reconcile、图库、插件代理、SSE Hub | W2、W4 | ⚠️ 依赖 W2 |
 | **W6** | Go 日志·邮件·删除 | `server/internal/{service,scheduler,mail,handler}` | 操作日志与查询、邮件发送与邮件日志、保留清理任务、删除流程（含远端） | W2、W3 | ✅ |
 | **W7** | 前端基座 | `web/src/{lib,types,components,store,i18n,mocks}`、`web/theme-default/` | **设计 token（`docs/DESIGN.md` §2）**、Axios/SSE 客户端、`types/api.ts`、Radix UI 组件库、路由与守卫、Zustand store、按契约的 mock；**默认首页主题的独立构建入口（`base: '/theme-assets/'`）** | W1 | ✅ 与 W2/W4 并行 |
-| **W8** | 前端页面 | `web/src/features/**` | 内置 SPA 的全部页面：登录/忘记密码/首登改密、上传、图库（无缩略图，D84；管理员 Tab 切换 D71）、相册、任务、日志、设置、存储、插件、用户管理、**主题管理（`/admin/themes`）**；**默认首页主题的内容**（Hero + 能力 + 场景 + FAQ + CTA，见 `DESIGN.md` §4.2） | W7 | ⚠️ 依赖 W7 |
+| **W8** | 前端页面 | `web/src/features/**` | 内置 SPA 的全部页面：登录/忘记密码/首登改密、上传、图库（无缩略图，D84；管理员 Tab 切换 D71）、任务、日志、设置、存储、插件、用户管理、**主题管理（`/admin/themes`）**；**默认首页主题的内容**（Hero + 能力 + 场景 + FAQ + CTA，见 `DESIGN.md` §4.2） | W7 | ⚠️ 依赖 W7 |
 | **W9** | Lsky 兼容 + 部署与文档 | `server/internal/{lsky,web}`、`deploy/`、`README.md` | Lsky v1 兼容层（挂 `/api/v1`）、**内置 SPA 的 embed 接线**（`server/internal/web/embed.go`）、Dockerfile/compose、用户与开发文档 | W3、W5、W6、W8 | 否（收尾） |
 | **W10** | **主题系统（首页）** | `server/internal/theme/`、`themes/default/` | 主题扫描 / manifest 解析校验（**含 `Pages`**）/ **`Pages` 最长前缀匹配分发** / seed / 静态托管（`/theme-assets`）/ zip 安装（9 条校验 + 原子性）/ **内嵌默认主题兜底**（永不白屏）/ `ThemeConfigs` 读写 / 构建标签 | W2、W7 | ✅ 与 W3/W4/W5/W6/W8 并行 |
 
@@ -310,13 +310,13 @@ server/internal/database/
   ├── dsn.go                            DSN 拼装（sqlite / postgres）
   ├── schema_meta.go                    SchemaMeta 读写
   ├── migrations.go                     schemaMigrations 表 + 升序执行（D16/D77）
-  └── migrate_v1.go                     v1 init：建 21 张表 + 全部索引
-server/internal/model/                  21 张表的 GORM 模型，按域分文件，**每个都实现 TableName()**
+  └── migrate_v1.go                     v1 init：建 20 张表 + 全部索引
+server/internal/model/                  20 张表的 GORM 模型，按域分文件，**每个都实现 TableName()**
                                          （含 ThemeConfigs，见 DATA-MODEL.md §3.3）
   ├── user.go                           Users / UserProfiles / OAuthIdentities /
   │                                     RefreshTokens / APITokens / LoginAttempts
   ├── storage.go                        StorageConfigs / StorageSecrets
-  ├── media.go                          Uploads / UploadResults / Albums
+  ├── media.go                          Uploads / UploadResults
   ├── job.go                            Jobs / JobItems / JobLogs
   ├── audit.go                          OperationLogs / EmailLogs
   ├── setting.go                        SystemSettings / UserSettings
@@ -324,7 +324,7 @@ server/internal/model/                  21 张表的 GORM 模型，按域分文�
   └── schema.go                         SchemaMeta
 server/internal/repository/             纯数据访问，返回模型，不写业务逻辑
   ├── user_repo.go  token_repo.go  login_attempt_repo.go
-  ├── storage_repo.go  upload_repo.go  album_repo.go
+  ├── storage_repo.go  upload_repo.go
   ├── job_repo.go  log_repo.go  email_repo.go
   ├── setting_repo.go  plugin_repo.go
 server/internal/crypto/aes.go           AES-256-GCM 加解密 + 主密钥加载/生成（D19）
@@ -363,7 +363,7 @@ server/internal/middleware/
 
 - `go vet ./...` 与 `go test ./...` 通过（含：DSN 拼装单测、AES 加解密往返、ULID 唯一性与前缀、迁移幂等性——连跑两次 `Version` 不变）。
 - `CGO_ENABLED=0 go build ./cmd/picgo-web` 成功。
-- 起服务后两种方言各建一次库：`SchemaMeta.Version = 1`，**21 张表**与索引全部存在（对照 DATA-MODEL §10 索引清单逐项核对，含 `ThemeConfigs(ThemeID, Key)` 唯一索引）。
+- 起服务后两种方言各建一次库：`SchemaMeta.Version = 1`，**20 张表**与索引全部存在（对照 DATA-MODEL §10 索引清单逐项核对，含 `ThemeConfigs(ThemeID, Key)` 唯一索引）。
 - **命名回归测试**：查库确认表名是大写驼峰（`SELECT name FROM sqlite_master WHERE type='table'` 里是 `Users` / `StorageConfigs` …，不是 `users` / `storage_configs`）；PgSQL 下同样确认（`information_schema.tables`）。
 - **引号回归测试**：在 PgSQL 下执行一条带双引号的原生 SQL 建索引成功；把引号去掉后确认会失败（把这个差异写进迁移注释，避免后人踩坑）。
 - `SettingsService` 读一个未落库的键返回代码默认值，`Set` 后返回 DB 值，`onChanged` 被触发。
@@ -521,12 +521,11 @@ server/internal/service/
   ├── quota_service.go   配额校验 / 累加 / 退还（D20/D21/D72）
   ├── rate_limit.go      上传限流（按张数，默认禁用，管理员跳过）（D73）
   ├── storage_service.go 存储配置 CRUD + 密钥加解密 + 启动 reconcile + Capabilities 缓存
-  ├── album_service.go   相册 CRUD + ImageCount 维护
-  ├── gallery_service.go 图库列表/详情/改名/移动/统计（含 Scope=mine|all）
+  ├── gallery_service.go 图库列表/详情/改名/统计（含 Scope=mine|all）
   ├── plugin_service.go  插件代理（转发 agent）+ Plugins 表缓存刷新
   └── picgo_service.go   picgo config/uploader/transformer/logs/resync 代理
 server/internal/handler/
-  ├── upload_handler.go  album_handler.go  storage_handler.go
+  ├── upload_handler.go  storage_handler.go
   ├── plugin_handler.go  job_handler.go    event_handler.go
   └── picgo_handler.go
 ```
@@ -535,9 +534,9 @@ server/internal/handler/
 
 | 主题 | 要求 |
 |---|---|
-| **路径前缀** | 全部内部端点在 **`/api/web/v1/**`**（D80）：`/api/web/v1/uploads`、`/api/web/v1/albums`、`/api/web/v1/storage/configs` … |
+| **路径前缀** | 全部内部端点在 **`/api/web/v1/**`**（D80）：`/api/web/v1/uploads`、`/api/web/v1/storage/configs` … |
 | **字段命名** | 请求/响应字段 PascalCase（`StorageUID` / `TotalItems` / `SucceededItems` / `ThumbURL` / `JobUID` …）（D81） |
-| **表名引用** | 一律用 `DATA-MODEL.md` 的 PascalCase 名（`Uploads` / `Jobs` / `JobItems` / `Albums` …） |
+| **表名引用** | 一律用 `DATA-MODEL.md` 的 PascalCase 名（`Uploads` / `Jobs` / `JobItems` …） |
 | **队列结构** | 一次 `POST /api/web/v1/uploads` = 1 个 `Jobs` 行（D36）+ N 个 `JobItems`；driver 信息（`StorageUID`）只在 `Jobs` 层（D38 一批一驱动） |
 | **并发控制** | worker 数 = `upload.concurrency`（**默认 1**，D35），作用在 **item 层**；`>1` 需 picgo-core 补丁（W0 已落地），但**只改配置值不改代码** |
 | **进度** | `已完成 item 数 / 总 item 数`，单文件内用 agent 回传的四档插值（D39） |
@@ -547,7 +546,7 @@ server/internal/handler/
 | **启动恢复** | 所有 `JobItems.Status=running` 重置为 `queued`，对应 job 回 `running` 并重新入队；源文件已不存在 → 直接标 `failed`，错误「源文件已清理」（D41） |
 | **优雅关闭** | SIGTERM：停收新任务（`/uploads` 返 `503`）→ 等在跑 item 完成（最多 `shutdownGraceSeconds`）→ 超时项回 `queued` 留待恢复 → 给前端推「服务正在重启」再关 SSE（D41） |
 | **落盘** | 暂存目录 `<dataDir>/uploads/<yyyy>/<mm>/<sha256>.<ext>`（仅暂存，非图片分发）；`upload.keepLocalCopy` 决定是否保留，`keepLocalDays` 决定保留期 |
-| **校验顺序** | 扩展名白名单（`upload.allowedExts`，`blockSvg` 可禁 SVG）→ 大小（`upload.maxSizeBytes`）→ 限流（**默认关**，管理员跳过）→ 配额（**管理员跳过**）→ 入队 |
+| **校验顺序** | 扩展名白名单（`upload.allowedExts`，`blockSvg` 默认禁 SVG）→ 大小（`upload.maxSizeBytes`）→ 限流（**默认关**，管理员跳过）→ 配额（**管理员跳过**）→ 入队 |
 | **MIME 嗅探** | 按**文件内容**嗅探，不信任 `Content-Type` |
 | **SSRF 防护** | `from-url` 解析真实 IP，拒绝私有网段与回环；`PICGO_WEB_ALLOW_PRIVATE_FETCH=true` 可关闭该限制 |
 | **配额** | 上传前校验 `Users.UsedBytes + 本批总量 > Users.CapacityBytes` → **`40302`**（`CapacityBytes=0` 不限额）；上传成功后按实际 `Size` 累加；删除时退还（D72） |
@@ -638,7 +637,7 @@ server/internal/handler/
 web/
 ├── vite.config.ts / tsconfig.json / eslint.config.js / components.json
 │       # 内置 SPA 的构建配置：base = '/'
-├── src/                        # 内置 SPA（图库/上传/相册/任务/日志/设置/后台/认证页）
+├── src/                        # 内置 SPA（图库/上传/任务/日志/设置/后台/认证页）
 │   ├── main.tsx  App.tsx
 │   ├── lib/
 │   │   ├── http.ts      Axios 实例（baseURL /api/web/v1）+ 拦截器：Code!==0 抛 ApiError；401 静默刷新
@@ -692,11 +691,11 @@ web/
 - `pnpm lint`、`pnpm typecheck`、`pnpm build` 全绿（**两个构建单元分别跑**：内置 SPA 与 `web/theme-default/`）。
 - 内置 SPA（`web/` 构建 → `go:embed`）与默认主题（`server/internal/theme/embedded/`）是两个独立单元，各自 `base` 不同。
 - `VITE_USE_MOCK=true` 起前端（`docker compose -f docker-compose-dev.yml up web`）时：登录成功 → 进入 AppShell → 侧栏导航按权限正确显隐；
-  `/login`、`/gallery`、`/upload`、`/albums`、`/jobs`、`/logs`、`/settings`、
+  `/login`、`/gallery`、`/upload`、`/jobs`、`/logs`、`/settings`、
   `/admin/storage`、`/admin/plugins`、`/admin/users`、`/admin/themes`、`/admin/site` 均可打开（可以是空状态）。
-- **`/` 的说明**：生产环境中 `/` 由**当前主题**接管（主题不可用时由**内嵌默认主题**接管），
-  **不会**落到内置 SPA。仅 `VITE_USE_MOCK=true pnpm dev`（无 Go 分发层）时会落到 SPA 的兜底路由，
-  属**开发便利**，不是交付行为。
+- **`/` 与 `/overview` 的说明**：生产环境中 `/` 由**当前主题**接管（主题不可用时由**内嵌默认主题**接管），
+  **不会**落到内置 SPA；因此控制台概览页固定使用 **`/overview`**（D102），SPA 内部只在访问 `/` 时重定向过去。
+  仅 `VITE_USE_MOCK=true pnpm dev`（无 Go 分发层）时 `/` 会走 SPA 的重定向，属**开发便利**，不是交付行为。
 - **资源前缀隔离可验证**：内置 SPA 产物内**不存在** `/theme-assets/` 引用；
   默认首页主题产物内**不存在** `/assets/` 引用（两者不得混用，D99.2）。
 - 401 拦截器行为可验证：使 mock 返回 401 后自动尝试刷新，失败则清登录态并跳转 `/login`。
@@ -714,11 +713,11 @@ web/
 
 ```
 web/src/features/                 # 全部属于【内置 SPA】
+├── overview/   **概览（`/overview`）**：控制台落地页（**不用 `/`**，`/` 是主题首页，D102）
 ├── auth/       login（邮箱密码）、reset-password、force-change-password
 ├── upload/     拖拽上传、粘贴上传、目标驱动选择、实时进度、失败重试
 ├── gallery/    图库（瀑布流/列表，**不做缩略图**，直接引图床 URL）（D84）
 │               + 顶部 Tab（我的/全部，仅管理员可见）+ 筛选 + 批量 + 灯箱 + 复制外链
-├── albums/     相册管理
 ├── storage/    存储配置列表 + 新建/编辑（插件 schema 表单）+ 测试连通 + 设默认 + 魔法路径配置
 ├── plugins/    已安装列表 + npm 搜索 + 安装/卸载/更新/启停 + README 抽屉 + 安装日志
 ├── themes/     **主题管理（`/admin/themes`）**：列表 / 上传 zip / 重新扫描 / 启用 / 卸载 /
@@ -731,7 +730,9 @@ web/src/features/                 # 全部属于【内置 SPA】
 ```
 
 > ❌ **内置 SPA 没有 `home/`**：首页 `/` 由**主题**提供（D94）。
-> 默认首页主题的代码在 **`web/theme-default/`**（W7 的独立构建单元），不在 `features/` 下。
+> ⚠️ 但控制台概览页是内置 SPA 的页面：固定使用 **`/overview`**（`features/overview/`，D102），
+> **不得**占用 `/`，否则侧边栏「概览」会跳到主题首页，与首页冲突。
+> 默认首页主题的代码在 **`PicGo-Web-Theme` 仓库**（D100），不在本仓库 `features/` 下。
 
 **关键实现要点**
 
@@ -783,11 +784,11 @@ server/internal/lsky/
   ├── strategies.go    GET /strategies（可用存储列表）
   ├── upload.go        POST /upload（multipart，复用 W5 上传队列）
   ├── images.go        GET /images、DELETE /images/{key}
-  └── albums.go        GET /albums、DELETE /albums/{id}
+  └── albums.go        GET /albums、DELETE /albums/{id}（伪造响应，D101）
 server/internal/web/embed.go          **内置 SPA 的 embed 接线**：`//go:embed dist`（`web/dist`）+ SPA 回退处理器
                                       仅负责「返回内置 SPA 的 index.html / assets」；
                                       **路由分发（含主题接管判断）在 W10 的 `internal/theme/`**（D99.1）
-deploy/docker/Dockerfile              多阶段：前端 → **默认主题打包** → PicGo-Core → agent → Go → 运行时
+根目录 `Dockerfile`              多阶段：前端 → **默认主题打包** → PicGo-Core → agent → Go → 运行时
 docker-compose.yml / docker-compose.pgsql.yml   最终版
 README.md                             面向用户只写 compose；开发/测试命令单独一节（D76）
 ```
@@ -803,7 +804,7 @@ README.md                             面向用户只写 compose；开发/测试
 | **上传复用** | `POST /upload` 走 W5 的同一个 `upload_service`（同一套队列、配额、限流），**不得另起一套上传路径** |
 | **key 映射** | Lsky 的 `images/{key}` 中的 `key` = `Uploads.UID` |
 | **开关与删除语义** | `integration.lsky.enabled`（默认 `true`）控制是否挂载；`integration.lsky.deleteRemoteOnDelete`（默认 `false`）控制 `DELETE /images/{key}` 是否同步删远端（该契约本身无此参数，故用开关表达） |
-| **Dockerfile** | 多阶段（`deploy/docker/Dockerfile`，**实测现状**）：① `node:24-alpine` 构建 `web/`（内置 SPA）；② `node:24-alpine` 构建 `picgo-agent`（**从 npm 装 `@yeqingky/picgo-core`**，并断言补丁存在）；③ `golang:1.25-alpine` `CGO_ENABLED=0` 编译，前端产物经 `COPY --from=web-builder` 进 `internal/webfs/dist`（**跨阶段不能用 `cp`**）；④ `alpine:3.21` 运行时（含 `nodejs`，agent 需要）<br>⚠️ 默认主题由 `go:embed` 内嵌，**不需要**构建归档；agent 由 Go 拉起，**不需要** entrypoint 脚本 |
+| **Dockerfile** | 多阶段（根目录 `Dockerfile`，**实测现状**）：① `node:24-alpine` 构建 `web/`（内置 SPA）；② `node:24-alpine` 构建 `picgo-agent`（**从 npm 装 `@yeqingky/picgo-core`**，并断言补丁存在）；③ `golang:1.25-alpine` `CGO_ENABLED=0` 编译，前端产物经 `COPY --from=web-builder` 进 `internal/webfs/dist`（**跨阶段不能用 `cp`**）；④ `alpine:3.21` 运行时（含 `nodejs`，agent 需要）<br>⚠️ 默认主题由 `go:embed` 内嵌，**不需要**构建归档；agent 由 Go 拉起，**不需要** entrypoint 脚本 |
 | **数据卷** | `./data` 挂载数据库 + `picgo/` 配置 + 上传暂存 + `secret.key` + **`themes/`（首页主题）**；compose 中显式声明并给出**「请自行备份 `./data`」**的提示（D82：项目不提供备份功能） |
 | **PgSQL 覆盖** | 用 compose 覆盖文件模式（`-f docker-compose.yml -f docker-compose.pgsql.yml`），不要用 profile（D76） |
 | **README 边界** | **面向用户的部署只写 docker compose**；systemd / 裸机二进制**不写成官方路径**；开发/构建/测试/lint 命令单独一节（D76/D79）；给出「**用 PicGo 桌面端 / PicList 连过来时填裸域名**，走 `/api/v1`」的说明 |
@@ -1106,7 +1107,7 @@ themes/default/            默认首页主题的打包产物（manifest.json + i
 | **魔法路径因驱动而异** | 用户配了模板却不生效 | 能力探测自动推断 `SupportsPathTemplate`；不支持时**降级为文件名前缀**并给出界面提示（D44） |
 | **Tailwind v4 / Radix 版本较新** | 组件踩坑 | 组件基座（W7）一次做对并集中封装，业务页面只组合；不引入第二套 UI 方案 |
 | **前端 SSE 断线** | 进度卡死、状态不同步 | `lib/sse.ts` 带心跳看护与自动重连；重连后主动拉一次任务/图库状态做自愈；服务端 25s `ping` |
-| **配额冗余计数漂移**（`Users.UsedBytes` / `Albums.ImageCount`） | 配额不准 | 所有增减走单一入口（`quota_service` / `delete_service`）；随每日维护任务**静默对账**（发现偏差才写日志）；删除流程单测覆盖。**不新增对账端点**（属运维动作，且 D82 不做导出导入类入口） |
+| **配额冗余计数漂移**（`Users.UsedBytes`） | 配额不准 | 所有增减走单一入口（`quota_service` / `delete_service`）；随每日维护任务**静默对账**（发现偏差才写日志）；删除流程单测覆盖。**不新增对账端点**（属运维动作，且 D82 不做导出导入类入口） |
 | **`/api/v1` 与 `/api/web/v1` 被混用** | 前端调错前缀、或新接口误占 Lsky 保留集 | 前缀已天然隔离（D80），**不再需要任何「路径让位」**；仍保留**启动时冲突检测并 panic** 作为防护；W9 验收含一条「列出全部注册路由并断言无重叠」的检查 |
 | **agent 崩溃/重启期间上传失败** | 用户体验差 | 健康探测 + 退避重启（最多 5 次）；期间返回 `503 / 50002`，前端提示并轮询 `/healthz`；job 已有重试机制兜底 |
 | **主题目录缺失/损坏**（被误删、解压不完整、manifest 写坏） | 首页白屏或 503，用户以为服务挂了 | **二进制内嵌一份默认主题**（`go:embed` 压缩归档）作为**运行时兜底**：主题无效时直接从内存归档服务（**永不白屏**）；启动时若 `data/themes/` 为空则自动 seed；写 `OperationLogs`（`theme.error`） + 后台主题页显著提示（D94.4） |
@@ -1169,13 +1170,13 @@ themes/default/            默认首页主题的打包产物（manifest.json + i
 |---|---|---|
 | **W0 PicGo-Core fork 与补丁** | ✅ **已完成** | 分支 `PicGo-Web`（基线 v3.0.2 / `f710083`），补丁 4 处（`UploadOptions.uploader` / `contextData` / per-context 配置覆盖 / `Lifecycle.step` 并发修复），**250 单测全绿**；实测并发两批次各走各的图床 |
 | **W1 契约与骨架** | ✅ **已完成** | `docs/` 九份 + `Makefile` + `.env.example` + `docker-compose{,.pgsql}.yml` + `.gitignore` + `AGENTS.md` |
-| **W2 Go 基础设施** | ✅ **已完成** | 12 个包；21 张表全 PascalCase + 13 个组合索引；**492 个测试用例**；`CGO_ENABLED=0` 静态编译 45MB |
+| **W2 Go 基础设施** | ✅ **已完成** | 12 个包；20 张表全 PascalCase + 12 个组合索引（相册表已于 D101 移除）；**492 个测试用例**；`CGO_ENABLED=0` 静态编译 45MB |
 | **W3 Go 鉴权与用户** | ✅ **已完成** | bcrypt/JWT/refresh 轮换/API Token/GitHub OAuth/登录限流/防枚举/首启引导；`/auth/*`、`/users/*` |
 | **W4 Agent 内核** | ✅ **已完成** | hono 侧车：单文件同步上传（同时判返回值与 `failed` 事件）、图床多配置、能力探测、魔法路径、远端删除、SSE、插件管理；**168 单测** |
-| **W5 Go 业务核心** | ✅ **已完成** | 存储（DB→config.json 键级合并投影 + reconcile）、上传队列（Job/JobItem、并发度可配、配额、限流、重试、超时、重启恢复、优雅关闭）、图库、相册 |
+| **W5 Go 业务核心** | ✅ **已完成** | 存储（DB→config.json 键级合并投影 + reconcile）、上传队列（Job/JobItem、并发度可配、配额、限流、重试、超时、重启恢复、优雅关闭）、图库 |
 | **W6 Go 日志·邮件·删除** | ✅ **已完成** | 操作日志查询、SMTP 发信 + EmailLogs（不存正文）、远端删除（D47）、每日清理、插件管理 |
 | **W7 前端基座** | ✅ **已完成** | 设计 token（DESIGN §2 全量）、30 个 UI 组件、http/sse 客户端、Zustand store、路由三层守卫、登录页 |
-| **W8 前端页面** | ✅ **已完成** | 131 个源文件：上传（队列 + 进度插值）、图库（无缩略图 + 管理员 Tab）、相册、任务、日志、存储（动态表单）、插件、主题、站点、用户、设置 |
+| **W8 前端页面** | ✅ **已完成** | 上传（队列 + 进度插值）、图库（无缩略图 + 管理员 Tab）、任务、日志、存储（动态表单）、插件、主题、站点、用户、设置 |
 | **W9 Lsky 兼容 + 静态托管** | ✅ **已完成** | 静态托管（`/assets` vs `/theme-assets`、SPA 回退、防穿越）；**Lsky v1 兼容层**（9 端点 + Lsky 信封 + Laravel 分页 + 令牌可重复签发）；**启动路由冲突检测**；Dockerfile（四阶段） |
 | **W10 主题系统** | ✅ **已完成** | `manifest.Pages` 自行注册 + 最长前缀匹配 + 认证页/后台永久保留 + 内嵌兜底 + seed + `ThemeConfigs` 三级兜底 + zip 安装 9 条校验 |
 
@@ -1205,7 +1206,7 @@ site/config  Site + Theme(Pages=["/"]) + Settings(BackgroundURL 默认 ACG API)
 ### 剩余工作
 
 1. **前端 e2e**：目前只有 typecheck/lint/build；端到端靠上面两个脚本（服务端视角）。
-2. **Docker 构建实测**：`deploy/docker/Dockerfile` 已通过指令自检，
+2. **Docker 构建实测**：根目录 `Dockerfile` 已通过指令自检，
    但**本机无 docker，未实际 `docker build` 过**。首次构建请留意：
    - `make vendor` 必须先生成 `deploy/vendor/picgo-*.tgz`（Dockerfile 依赖它）
    - Go 阶段用 `COPY --from=web-builder` 取前端产物（跨阶段不能用 `cp`）
@@ -1269,7 +1270,7 @@ Lsky 契约（snake_case）、环境变量（`UPPER_SNAKE_CASE`）、settings �
 | W8 / 站点设置 | 站点设置含「首页内容 / 背景图」 | ✅ 已移出；改为**主题管理页 `/admin/themes`** |
 | W9 产出 | 「前端 embed」（语义含糊，易误读为「主题也 embed」） | ✅ 明确为「**内置 SPA 的 embed 接线**」 |
 | 工作流表 | 无 W10 | ✅ 新增 **W10 主题系统（首页）** |
-| 表数量 | 20 张 | ✅ **21 张**（新增 `ThemeConfigs`，D95） |
+| 表数量 | 20 张 | ✅ **20 张**（新增 `ThemeConfigs`（D95）；相册表后于 D101 移除） |
 | D83 / D85（旧首页与背景图决策） | 曾被本文引用 | ✅ 已分别被 **D94**（首页改由主题提供）与 **D97**（背景图单一 URL）取代；本文不再引用 |
 | **D84**（不做缩略图） / **D86**（页面访问范围） | 曾被本文引用 | ✅ **仍然有效**，本文继续引用（未受本轮主题变更影响） |
 

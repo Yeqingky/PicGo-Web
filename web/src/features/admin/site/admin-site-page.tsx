@@ -2,7 +2,7 @@ import { Info, Loader2, Mail, RotateCw, Save } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { PageHeader } from '@/components/common/page-header'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,12 +21,57 @@ import { formatDateTime } from '@/lib/format'
 import { toApiError, type SystemSettingItem } from '@/types/api'
 import { cn } from '@/lib/utils'
 
+/** 将 JSON 值递归排序，避免仅因对象键顺序不同而误判为已修改。 */
+function sortJSON(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJSON)
+  if (value !== null && typeof value === 'object') {
+    const object = value as Record<string, unknown>
+    return Object.fromEntries(
+      Object.keys(object)
+        .sort()
+        .map((key) => [key, sortJSON(object[key])]),
+    )
+  }
+  return value
+}
+
+/** 把设置值规约成可比较的形式，兼容 API 返回值与输入控件值的类型差异。 */
+function comparableSettingValue(item: SystemSettingItem | undefined, value: unknown): string {
+  if (!item) return String(value ?? '')
+
+  switch (item.Type) {
+    case 'bool':
+      return String(value === true || value === 'true')
+    case 'int': {
+      if (value === '' || value === null || value === undefined) return ''
+      const numeric = typeof value === 'number' ? value : Number(value)
+      return Number.isNaN(numeric) ? String(value) : String(numeric)
+    }
+    case 'json': {
+      const parsed = typeof value === 'string' ? (() => {
+        try {
+          return JSON.parse(value) as unknown
+        } catch {
+          return value.trim()
+        }
+      })() : value ?? []
+      return JSON.stringify(sortJSON(parsed)) ?? ''
+    }
+    default:
+      return String(value ?? '')
+  }
+}
+
+function sameSettingValue(item: SystemSettingItem | undefined, left: unknown, right: unknown): boolean {
+  return comparableSettingValue(item, left) === comparableSettingValue(item, right)
+}
+
 /**
  * 站点设置（DESIGN.md §5.7，admin）。
  *
  * ⚠️ **没有「首页内容」与「背景图」两个 Tab**（D95 归类原则：
  *    「主题的画法 → 主题配置；站点属性 → `site.*`」）—— 它们已迁到
- *    **主题管理 → 主题设置**（`/admin/themes`）。页面内放引导链接。
+ *    **主题管理 → 主题设置**（`/admin/themes`）。
  *
  * 键名是 **`dot.lowerCamel` 原样**（D81.3 第 3 条）：它们是 KV 表的字符串 key。
  * 每项右侧显示 `Source` 徽章（**来自数据库 / 使用默认值**）。
@@ -64,7 +109,19 @@ export function AdminSitePage() {
   }
 
   const setValue = (key: string, value: unknown) => {
-    setDirty((prev) => ({ ...prev, [key]: value }))
+    setDirty((prev) => {
+      const item = getItem(key)
+      // dirty 只记录「当前值与初始值不同」的字段。
+      // 用户修改后还原原值时，必须移除该字段，否则会一直显示「未保存」。
+      const original = item?.Type === 'secret' ? '' : item?.Value
+      if (sameSettingValue(item, value, original)) {
+        if (!(key in prev)) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      return { ...prev, [key]: value }
+    })
   }
 
   const save = async () => {
@@ -381,11 +438,6 @@ export function AdminSitePage() {
                   <span className="text-muted-foreground">{t('ABOUT_UPTIME')}</span>
                   <span>{formatDateTime(Math.floor(Date.now() / 1000) - (info?.Uptime ?? 0))}</span>
                 </div>
-
-                <Alert variant="info" className="mt-3">
-                  <AlertTitle>{t('ABOUT_HOME_HINT_TITLE')}</AlertTitle>
-                  <AlertDescription>{t('ABOUT_HOME_HINT_DESC')}</AlertDescription>
-                </Alert>
               </CardContent>
             </Card>
           </TabsContent>

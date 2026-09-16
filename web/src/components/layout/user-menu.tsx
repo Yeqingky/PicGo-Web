@@ -1,4 +1,4 @@
-import { FileText, LogOut, Settings as SettingsIcon, ShieldCheck, User as UserIcon } from 'lucide-react'
+import { LogOut, Settings as SettingsIcon, ShieldCheck, User as UserIcon } from 'lucide-react'
 import { useNavigate } from 'react-router'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -23,7 +23,7 @@ function initial(user: { Nickname?: string; Email: string }): string {
 /**
  * 用户菜单（DESIGN.md §4.1）。
  *
- * 含「个人设置 / 操作日志 / 退出登录」。
+ * 含「个人设置 / 退出登录」。
  */
 export function UserMenu() {
   const user = useAuthStore((state) => state.user)
@@ -71,11 +71,6 @@ export function UserMenu() {
         <DropdownMenuItem onSelect={() => navigate('/settings')}>
           <SettingsIcon aria-hidden />
           {t('USER_MENU_PROFILE')}
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onSelect={() => navigate('/logs')}>
-          <FileText aria-hidden />
-          {t('USER_MENU_LOGS')}
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

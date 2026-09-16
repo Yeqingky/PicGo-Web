@@ -91,13 +91,13 @@ gorm.Open(dialector, &gorm.Config{
 | 可选性不同 | `UserProfiles`（昵称/头像）独立于 `Users`（邮箱/密码/角色） |
 | 一对多关系 | `EmailLogs` 独立成表，不塞进 JSON |
 
-## 1. 表清单（21 张）
+## 1. 表清单（20 张）
 
 ```
 身份鉴权  Users / UserProfiles / OAuthIdentities / RefreshTokens / APITokens / LoginAttempts
 存储配置  StorageConfigs / StorageSecrets
 主题配置  ThemeConfigs
-媒体资源  Uploads / UploadResults / Albums
+媒体资源  Uploads / UploadResults
 任务执行  Jobs / JobItems / JobLogs
 审计记录  OperationLogs / EmailLogs
 系统配置  SystemSettings / UserSettings
@@ -120,7 +120,6 @@ gorm.Open(dialector, &gorm.Config{
 | `ThemeConfig` | `ThemeConfigs` | | |
 | `Upload` | `Uploads` | `SchemaMeta` | `SchemaMeta`（单数，刻意） |
 | `UploadResult` | `UploadResults` | | |
-| `Album` | `Albums` | | |
 
 ---
 
@@ -270,6 +269,8 @@ type StorageConfig struct {
 {
   "SupportsPathTemplate": true,      // 驱动是否支持自定义远端路径（D44）
   "SupportsRemoteDelete": true,      // 插件是否实现了 remove 事件（D47）
+  "ServerRenames": false,            // 图床是否无视传入文件名、服务端自行命名（如 NodeImage 短链）
+                                     // —— picgo 协议不声明，由上传结果运行时探测回写（只置位不回退）
   "ConfigFields": ["repo", "token", "path", "branch", "customUrl"],  // 该驱动的配置字段
   "PathFieldNames": ["path", "root", "basePath"],                    // 推断依据
   "DetectedAt": 1789347956,
@@ -343,7 +344,6 @@ type Upload struct {
     UID          string `gorm:"size:32;uniqueIndex;not null"`     // up_ 前缀的 ULID
     UserUID      string `gorm:"size:32;index;not null"`
     StorageUID   string `gorm:"size:32;index;not null"`           // 引用 storage_configs.uid
-    AlbumUID     string `gorm:"size:32;index"`                    // 可空：不属于任何相册
 
     FileName     string `gorm:"size:255;not null"`                // 最终文件名（含扩展名）
     OriginalName string `gorm:"size:255"`                         // 原始上传文件名
@@ -406,27 +406,10 @@ type UploadResult struct {
 > **为何原样存**：删除远端文件时要把它原封不动交回插件
 > （D47 的 `remove` 事件），字段名被改过插件就认不出来了。
 
-### 4.3 `Albums` — 相册
+### 4.3（已移除，D101）~~`Albums`~~ — 相册
 
-> 对外路径为 **`/api/web/v1/albums`**（D80：内部 API 与 Lsky 兼容层前缀已完全隔离）。
-
-```go
-type Album struct {
-    ID             uint64 `gorm:"primaryKey;autoIncrement"`
-    UID            string `gorm:"size:32;uniqueIndex;not null"`
-    UserUID        string `gorm:"size:32;index;not null"`
-    ParentUID      string `gorm:"size:32;index"`    // 预留给未来嵌套；当前恒为空
-    Name           string `gorm:"size:128;not null"`
-    Intro          string `gorm:"size:512"`
-    CoverUploadUID string `gorm:"size:32"`
-    ImageCount     int64  `gorm:"not null;default:0"` // 冗余计数
-    SortOrder      int    `gorm:"not null;default:0"`
-    Metadata       string `gorm:"type:text"`
-    CreatedAt      int64  `gorm:"not null"`
-    UpdatedAt      int64  `gorm:"not null"`
-}
-// uniqueIndex: (UserUID, Name)
-```
+> 相册功能已整体移除（D101）：本表不再建，初始迁移直接不含它。
+> 章节号保留，避免既有交叉引用失配。
 
 ---
 
@@ -526,11 +509,14 @@ type OperationLog struct {
 
 **已确定的类型清单**（可扩展，新增无需迁移）：
 
+`OperationLogs.Type` 只保存稳定的小写字符串标识, 不保存语言相关的显示名称。
+前端根据该标识通过 i18n 映射展示文案; 新增类型不应把中文或其它语言写入数据库。
+
 | Type | 触发点 |
 |---|---|
 | `upload` | 上传成功 / 失败 |
 | `image.delete` | 删除图片（含远端是否删成功） |
-| `image.update` | 重命名 / 移动相册 |
+| `image.update` | 重命名 |
 | `mail.send` | 邮件发送成功 / 失败 |
 | `user.create` | 账号创建 |
 | `user.delete` | 账号注销 |
@@ -685,14 +671,13 @@ system_settings 表   业务配置，DB 为真相源
 |---|---|---|---|
 | `upload.maxSizeBytes` | int | `20971520` | 单文件上限（20 MiB） |
 | `upload.allowedExts` | json | `["jpg","jpeg","png","gif","webp","bmp","svg","ico","avif"]` | 扩展名白名单 |
-| `upload.blockSvg` | bool | `false` | 禁用 SVG |
+| `upload.blockSvg` | bool | `true` | 默认禁止上传 SVG；显式关闭后才允许（仍需在白名单中） |
 | `upload.concurrency` | int | `1` | 队列并发度；`>1` 需 picgo-core 补丁（D35） |
 | `upload.retryTimes` | int | `1` | 单文件失败重试次数 |
 | `upload.retryBackoffMs` | int | `2000` | 重试退避基数（指数增长） |
 | `upload.queueMaxLength` | int | `1000` | 队列上限，超出返 `42901` |
 | `upload.itemTimeoutSeconds` | int | `300` | 单文件超时 |
 | `upload.shutdownGraceSeconds` | int | `30` | 优雅关闭等待时长 |
-| `upload.defaultAlbumUID` | string | `""` | 默认相册（按用户可覆盖） |
 | `upload.rateLimit.enabled` | bool | **`false`** | 上传限流总开关（**默认禁用**，D73） |
 | `upload.rateLimit.perHour` | int | `100` | 每用户每小时最多张数 |
 | `upload.rateLimit.perDay` | int | `500` | 每用户每天最多张数 |
@@ -874,14 +859,10 @@ ThemeConfigs(ThemeID)                     卸载时清理
 Uploads(UID) unique
 Uploads(UserUID, CreatedAt DESC)         图库列表（主查询）
 Uploads(StorageUID)                      按驱动筛选
-Uploads(AlbumUID)                        相册内图片
 Uploads(Status)                          失败重试
 Uploads(JobUID)                          批次内图片
 Uploads(SHA256)                          自查（非唯一）
 UploadResults(UploadUID) unique
-
-Albums(UID) unique
-Albums(UserUID, Name) unique
 
 Jobs(UID) unique
 Jobs(Status, CreatedAt)                  任务面板

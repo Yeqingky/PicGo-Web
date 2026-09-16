@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -37,8 +38,16 @@ type AgentBridge struct {
 // NewAgentBridge 构造。
 func NewAgentBridge(cfg AgentBridgeConfig, hub *Hub, log Logger) *AgentBridge {
 	if cfg.HTTPClient == nil {
-		// 无整体超时：SSE 是长连接，超时由 ctx 控制
-		cfg.HTTPClient = &http.Client{}
+		// 无整体超时：SSE 是长连接，超时由 ctx 与空闲看护控制。
+		// 连接阶段的超时放在 Transport 上（见 stream 的说明），不能放在
+		// request context 上 —— 那会连响应 body 一起取消。
+		cfg.HTTPClient = &http.Client{
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: bridgeConnectTimeout}).DialContext,
+				TLSHandshakeTimeout:   bridgeConnectTimeout,
+				ResponseHeaderTimeout: bridgeConnectTimeout,
+			},
+		}
 	}
 	return &AgentBridge{cfg: cfg, hub: hub, log: log}
 }
@@ -97,15 +106,17 @@ func (b *AgentBridge) Run(ctx context.Context) {
 }
 
 // stream 建立一次连接并读取直到出错。
+//
+// ⚠️ 连接超时**不能**用 `context.WithTimeout` + 建立后 cancel 的方式：
+// Go 的 http client 会把「request context 结束」直接等同于「丢弃响应」，
+// cancel 后 body 立刻报 context canceled —— 表现就是刚连上就断、
+// 无限重连循环（踩过）。超时下沉到 Transport 的 Dialer/TLS/响应头（见构造）。
 func (b *AgentBridge) stream(ctx context.Context) error {
 	if strings.TrimSpace(b.cfg.EventsURL) == "" {
 		return fmt.Errorf("agent EventsURL 为空")
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, bridgeConnectTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, b.cfg.EventsURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.EventsURL, nil)
 	if err != nil {
 		return fmt.Errorf("构造 SSE 请求失败: %w", err)
 	}
@@ -125,8 +136,6 @@ func (b *AgentBridge) stream(ctx context.Context) error {
 		return fmt.Errorf("agent 事件流返回 HTTP %d", resp.StatusCode)
 	}
 
-	// 连接建立成功：取消「建立超时」，改用「空闲超时」看护
-	cancel()
 
 	if b.log != nil {
 		b.log.Info("已连接 agent 事件流", "url", b.cfg.EventsURL)

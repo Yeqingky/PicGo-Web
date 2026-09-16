@@ -6,7 +6,7 @@ import { getSharedSSEClient, SSEEvent, type SSEEventName, type SSEStatus } from 
  * 任务与实时推送状态（DESIGN.md §9.4 / §11）。
  *
  * 归属：
- *  - **SSE 连接状态**（供顶栏展示「连接已断开，正在重连…」）
+ *  - **SSE 连接状态**（供侧栏底部展示服务器在线 / 离线）
  *  - **正在跟踪的 JobUID 集合**（上传 / 插件安装 / 主题安装都会产生 job）
  *
  * 注意区分两层「任务」：
@@ -31,8 +31,6 @@ const MAX_LOGS_PER_JOB = 500
 interface TaskState {
   /** SSE 连接状态 */
   sseStatus: SSEStatus
-  /** 是否已连接过（用于区分「还没连」与「已断开」） */
-  sseEverConnected: boolean
   /** 重连尝试次数 */
   sseAttempt: number
   /** 正在跟踪的任务 */
@@ -56,7 +54,6 @@ interface TaskActions {
 
 export const useTaskStore = create<TaskState & TaskActions>()((set) => ({
   sseStatus: 'idle',
-  sseEverConnected: false,
   sseAttempt: 0,
   jobs: {},
   jobsRevision: 0,
@@ -71,7 +68,6 @@ export const useTaskStore = create<TaskState & TaskActions>()((set) => ({
         set({
           sseStatus: change.status,
           sseAttempt: change.attempt ?? 0,
-          ...(change.status === 'open' ? { sseEverConnected: true } : {}),
         })
       })
     }

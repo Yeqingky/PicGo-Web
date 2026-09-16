@@ -21,7 +21,7 @@ import (
 // BusinessDeps 是业务层（W5/W6）的路由接线依赖。
 //
 // 由 `internal/server` 在 `registerRoutes()` 里构造并调用 `RegisterBusiness`。
-// 这样 W5/W6 的多个子模块（存储 / 上传 / 图库 / 相册 / 任务 / 日志 / 邮件 / 插件）
+// 这样 W5/W6 的多个子模块（存储 / 上传 / 图库 / 任务 / 日志 / 邮件 / 插件）
 // 只需改动本文件，`server.go` 只有一个调用点。
 type BusinessDeps struct {
 	DB       *database.DB
@@ -45,7 +45,6 @@ type BusinessServices struct {
 	Storage *service.StorageService
 	Upload  *service.UploadService
 	Gallery *service.GalleryService
-	Album   *service.AlbumService
 	Job     *service.JobService
 	Log     *service.LogService
 	Email   *service.EmailService
@@ -59,7 +58,6 @@ type BusinessServices struct {
 //
 //	/storage/**    admin（D4：存储驱动只有管理员能配置）
 //	/uploads/**    需登录（普通用户管自己的图）
-//	/albums/**     需登录
 //	/jobs/**       需登录（Scope=all 仅管理员）
 //	/events        需登录（SSE；允许 ?Token=）
 //	/logs/**       admin（全站操作轨迹）
@@ -86,7 +84,6 @@ func RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, 
 	settingRepo := repository.NewSettingRepo(gdb)
 	storageRepo := repository.NewStorageConfigRepo(gdb)
 	uploadRepo := repository.NewUploadRepo(gdb)
-	albumRepo := repository.NewAlbumRepo(gdb)
 	jobRepo := repository.NewJobRepo(gdb)
 
 	// ---- 审计（W3 已有写入侧）----
@@ -97,22 +94,21 @@ func RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, 
 
 	uploadSvc := service.NewUploadService(
 		d.Cfg, d.Log, d.Settings,
-		uploadRepo, jobRepo, userRepo, albumRepo,
+		uploadRepo, jobRepo, userRepo,
 		storageSvc, d.Agent, d.Hub, auditSvc,
 	)
 
 	gallerySvc := service.NewGalleryService(
 		d.Cfg, d.Log, d.Settings,
-		uploadRepo, albumRepo, userRepo, storageSvc, d.Agent, d.Hub, auditSvc,
+		uploadRepo, userRepo, storageSvc, d.Agent, d.Hub, auditSvc,
 	)
 
-	albumSvc := service.NewAlbumService(d.Log, albumRepo, uploadRepo, auditSvc)
 	jobSvc := service.NewJobService(d.Log, jobRepo, uploadRepo, auditSvc)
 	logSvc := service.NewLogService(d.Log, logRepo, emailLogRepo)
 	emailSvc := service.NewEmailService(
 		d.Cfg, d.Log, d.Settings, userRepo, tokenRepo, settingRepo, emailLogRepo, auditSvc,
 	)
-	pluginSvc := service.NewPluginService(d.Log, d.Agent, d.Hub, auditSvc)
+	pluginSvc := service.NewPluginService(d.Log, d.Agent, d.Hub, auditSvc, jobRepo)
 
 	// 让 storage service 能在「已无可用驱动」时发系统通知（解耦：用回调注入 Hub）
 	if d.Hub != nil {
@@ -137,9 +133,6 @@ func RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, 
 
 	// 图库（需登录）
 	NewGalleryHandler(gallerySvc, uploadSvc, d.Log).Register(api.Group("/uploads", requireLogin...))
-
-	// 相册（需登录）
-	NewAlbumHandler(albumSvc, d.Log).Register(api.Group("/albums", requireLogin...))
 
 	// 任务（需登录）
 	NewJobHandler(jobSvc, d.Hub, d.Log).Register(api.Group("/jobs", requireLogin...))
@@ -181,7 +174,6 @@ func RegisterBusiness(api *gin.RouterGroup, d BusinessDeps) (*BusinessServices, 
 		Storage: storageSvc,
 		Upload:  uploadSvc,
 		Gallery: gallerySvc,
-		Album:   albumSvc,
 		Job:     jobSvc,
 		Log:     logSvc,
 		Email:   emailSvc,

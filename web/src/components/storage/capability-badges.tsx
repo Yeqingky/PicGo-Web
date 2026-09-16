@@ -1,4 +1,4 @@
-import { FolderTree, ShieldOff, Trash2 } from 'lucide-react'
+import { FolderTree, Info, ShieldOff, Trash2 } from 'lucide-react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { t } from '@/i18n'
@@ -8,9 +8,11 @@ import type { StorageCapabilities } from '@/types/api'
 /**
  * 驱动能力徽章（DESIGN.md §5.3）。
  *
- * 两个能力（来自 agent 探测 → 服务端缓存，D77：**不硬编码驱动名列表**）：
+ * 三个能力（来自 agent 探测 → 服务端缓存，D77：**不硬编码驱动名列表**）：
  *  - `SupportsPathTemplate` —— 支持自定义远端路径（魔法路径的前提）
  *  - `SupportsRemoteDelete` —— 插件实现了 `remove` 事件（远端删除的前提，D47）
+ *  - `ServerRenames` —— 图床无视传入文件名（服务端自行命名，如 NodeImage）
+ *    —— 此项由上传结果**运行时探测回写**（初始 false，探测到才置 true）
  *
  * **不支持时必须给出原因**（否则管理员会以为是自己配错了）。
  */
@@ -40,6 +42,18 @@ export function CapabilityBadges({ capabilities, className }: CapabilityBadgesPr
         failReason={t('STORAGE_CAP_DELETE_NO_REASON')}
         failIcon="trash"
       />
+
+      {capabilities.ServerRenames ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex cursor-help items-center gap-1 text-warning">
+              <Info className="size-3.5" aria-hidden />
+              {t('STORAGE_CAP_SERVER_RENAMES')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('STORAGE_CAP_SERVER_RENAMES_REASON')}</TooltipContent>
+        </Tooltip>
+      ) : null}
     </div>
   )
 }

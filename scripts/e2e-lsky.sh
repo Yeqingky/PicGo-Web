@@ -375,13 +375,14 @@ else
     bad "GET /images 不符合契约" "$(printf '%s' "$IMGS" | head -c 240)"
 fi
 
-# ---- 3.6 GET /albums ----
+# ---- 3.6 GET /albums（伪造响应：相册功能已移除，恒返回空数组）----
 ALBUMS="$(curl -sS --max-time 15 -H "Authorization: Bearer $TOK" "$LSKY_API/albums")"
 printf '%s' "$ALBUMS" | python3 -c '
 import sys,json
 d=json.load(sys.stdin)
 assert d.get("status") is True and isinstance(d["data"], list)
-' 2>/dev/null && ok "GET /albums 返回数组" || bad "GET /albums 不符合契约" "$(printf '%s' "$ALBUMS" | head -c 160)"
+assert len(d["data"]) == 0, "albums 应为伪造的空列表"
+' 2>/dev/null && ok "GET /albums 返回伪造的空数组" || bad "GET /albums 不符合契约" "$(printf '%s' "$ALBUMS" | head -c 160)"
 
 # ---- 3.7 DELETE /images/{key} ----
 if [ -n "$UPLOAD_KEY" ]; then

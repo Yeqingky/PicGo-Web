@@ -22,7 +22,7 @@ services:
     image: ghcr.io/yeqingky/picgo-web:latest
     build:
       context: .
-      dockerfile: deploy/docker/Dockerfile
+      dockerfile: Dockerfile
 
     container_name: picgo-web
     restart: unless-stopped
@@ -54,6 +54,12 @@ services:
     volumes:
       # 这一切就是全部状态：数据库 + 主密钥 + 上传暂存 + picgo 配置 + 主题
       # 备份整个目录即完成备份（D82：本项目不提供导出/导入功能）
+      #
+      # ⚠️ 用宿主目录挂载（bind mount），不用存储卷（named volume）。
+      #    权限提示：容器内进程以 **root** 运行（镜像无 USER 指令），
+      #    目录缺失时 docker 会自动创建（root 属主），**无需手工 chown**；
+      #    若在宿主手工预建，用普通目录即可：
+      #      mkdir data
       - ./data:/data
 
     healthcheck:

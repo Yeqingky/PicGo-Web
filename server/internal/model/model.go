@@ -7,12 +7,12 @@
 //   - 枚举存字符串，不用 DB enum
 //   - **只建索引，不建 FOREIGN KEY 约束**（D77）：两方言行为差异大且阻碍归档
 //
-// 表清单（21 张，见 DATA-MODEL.md §1）：
+// 表清单（20 张，见 DATA-MODEL.md §1）：
 //
 //	身份鉴权  Users / UserProfiles / OAuthIdentities / RefreshTokens / APITokens / LoginAttempts
 //	存储配置  StorageConfigs / StorageSecrets
 //	主题配置  ThemeConfigs
-//	媒体资源  Uploads / UploadResults / Albums
+//	媒体资源  Uploads / UploadResults
 //	任务执行  Jobs / JobItems / JobLogs
 //	审计记录  OperationLogs / EmailLogs
 //	系统配置  SystemSettings / UserSettings

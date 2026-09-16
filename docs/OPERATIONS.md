@@ -33,7 +33,7 @@
 |---|---|---|---|
 | 上传队列（Job / JobItem） | Go | `Jobs` `JobItems` | D35–D39 |
 | 启动恢复 / 优雅关闭 | Go + agent | `Jobs` `JobItems` | D41 |
-| 存储配额 | Go | `Users` `Albums` | D20 D21 D72 |
+| 存储配额 | Go | `Users` | D20 D21 D72 |
 | 上传限流（**默认禁用**） | Go | `Uploads`（计数来源） | D40 D73 |
 | 操作日志 | Go | `OperationLogs` | D45 D74 |
 | 邮件 + 邮件日志 | Go | `EmailLogs` `OperationLogs` | D29 |
@@ -122,7 +122,7 @@ POST /api/web/v1/uploads     一次 HTTP 请求 = 1 个 Job（含 N 个文件）
 ```
 POST /api/web/v1/uploads
  ① 鉴权                       未登录 → 40102
- ② 参数校验                   扩展名白名单 / 单文件大小 / 文件数 > 0 → 40001
+ ② 参数校验                   扩展名白名单 / 默认拒绝 SVG / 单文件大小 / 文件数 > 0 → 40001
  ③ 解析 StorageUID            未配置可用存储 → 40001
  ④ 队列容量校验               在队 Job 数 ≥ upload.queueMaxLength → 42901
  ⑤ 配额校验（D20）            仅非 admin；超限 → 40302
@@ -243,6 +243,9 @@ progress(%)   = floor((done + fraction) / TotalItems * 100)
   重置重试是唯一安全选择（代价是可能重复上传一张图；这是 D66 取消去重后
   我们接受的代价——图床会多一个孤儿文件，但不影响正确性）。
 - 恢复完成后，若某 Job 的**全部 item 已终态**，直接结算 Job 状态并写 `OperationLogs`。
+- **插件类任务（`plugin.*`）例外**：它们的执行期状态只在 agent 内存，
+  重启后既无 worker 拾取也无法得知结果，因此直接置 `failed`
+  （`Error = "服务或内核重启导致任务中断，结果未知"`，见 `JobRepo.FailOrphanedPlugins`）。
 
 ### 2.2 优雅关闭
 
@@ -274,8 +277,8 @@ progress(%)   = floor((done + fraction) / TotalItems * 100)
 ```
 
 - **不丢数据**：所有状态在 ④⑤ 都落库，⑤ 之后即使被强杀也不影响下次恢复。
-- 前端体验：SSE 断开后前端展示「连接已断开，正在重连」，并轮询 `GET /healthz`
-  直到恢复；恢复后自动刷新任务列表。
+- 前端体验：SSE 断开后由侧栏底部状态区显示「服务器离线」并自动重连，不在内容区顶部插入提示条；
+  恢复后自动刷新任务列表。
 
 ### 2.3 agent 的生命周期与健康探测（D7）
 
@@ -365,17 +368,14 @@ picgo 内置 server `36677`（**默认不启用**）。
 | 列 | 增加时机 | 减少时机 |
 |---|---|---|
 | `Users.UsedBytes` | 上传成功（`+= Size`） | 删除记录（`-= Size`） |
-| `Albums.ImageCount` | 上传成功且归属该相册 | 删除记录 / 移出相册 |
 
 **维护要求**
 
 1. **只允许 service 层改**：通过 `internal/repository` 暴露的专用方法
    （如 `AddUsedBytes(tx, userUID, delta)`），禁止在 handler 或别的 service 里裸写。
-2. **与业务写入同事务**：上传成功时「更新 `Uploads` + 累加 `UsedBytes` + `ImageCount++`」
+2. **与业务写入同事务**：上传成功时「更新 `Uploads` + 累加 `UsedBytes`」
    必须在**同一个 DB 事务**内，避免漂移。
-3. **移动相册**（`POST /api/web/v1/albums/{uid}/move-uploads`）：
-   同一事务内「源相册 `-1`、目标相册 `+1`」，`UsedBytes` **不变**。
-4. 漂移可能来源：进程在事务外被杀、人工改库、历史数据迁移。
+3. 漂移可能来源：进程在事务外被杀、人工改库、历史数据迁移。
 
 **对账（重算）**
 
@@ -384,10 +384,6 @@ SQL（两方言通用，GORM 表达即可；注意 PgSQL 需给标识符加双�
   SELECT "UserUID", COALESCE(SUM("Size"), 0) FROM "Uploads"
    WHERE "Status" = 'success' GROUP BY "UserUID"
   → 与 Users.UsedBytes 逐条比对
-
-  SELECT "AlbumUID", COUNT(*) FROM "Uploads"
-   WHERE "AlbumUID" <> '' GROUP BY "AlbumUID"
-  → 与 Albums.ImageCount 逐条比对
 ```
 
 | 方式 | 说明 |
@@ -484,13 +480,14 @@ if !admin && enabled:
 
 ### 5.3 类型清单（含触发点与建议的 `Detail`）
 
-> **`Type` 的取值是字符串枚举，保持小写点号风格不变**（D81.3）。
+> **`Type` 的取值是字符串枚举，保持小写点号风格不变**（D81.3）。数据库与 API 只使用该稳定值,
+> 不保存或返回语言相关的显示名称; 管理后台由前端 i18n 映射类型文案。
 
 | `Type` | 触发点 | `Status` | `TargetType` / `TargetUID` | `Detail` 建议内容 |
 |---|---|---|---|---|
 | `upload` | 上传批次结束（成功或失败各一条） | success/failed | `job` / JobUID | `{StorageUID, Total, Succeeded, Failed, Bytes}` |
 | `image.delete` | 删除图片（单张） | success/failed | `upload` / UploadUID | `{DeleteRemote, RemoteDeleted, Reason, StorageUID, Size}` |
-| `image.update` | 重命名 / 移动相册 | success/failed | `upload` / UploadUID | 改名 `{AliasName}`；移动 `{AlbumUIDFrom, AlbumUIDTo}` |
+| `image.update` | 重命名 | success/failed | `upload` / UploadUID | `{AliasName}` |
 | `mail.send` | 每次发信（成功/失败各一条） | success/failed | `email` / EmailLogUID | `{to, template, subject}` |
 | `user.create` | 管理员建号 / 邮件邀请建号 | success/failed | `user` / UserUID | `{Email, Role, CapacityBytes, Invite}` |
 | `user.delete` | 账号注销 | success/failed | `user` / UserUID | `{Email, DeletedUploads, FreedBytes}` |
@@ -502,11 +499,11 @@ if !admin && enabled:
 | `plugin.uninstall` | 卸载插件 | success/failed | `plugin` / 包名 | `{Names}` |
 | `plugin.update` | 更新插件 | success/failed | `plugin` / 包名 | `{Names, From, To}` |
 | `auth.login` | 登录成功 | success | `user` / UserUID | `{Method}` |
-| `auth.failed` | 登录失败 | failed | `user` / 空或已存在 UserUID | `{Email, Reason}`（**不记密码**） |
+| `auth.failed` | 登录失败 | failed | `user` / 空或已存在 UserUID | `{Email, Reason}`（**不记密码**）。⚠️ 仅剩「被禁用账号的登录尝试」与「未绑定的 OAuth 拒绝」两类；凭据错误（含触发限流）已不再写入（防暴力枚举刷爆），历史行保留可查 |
 | `auth.logout` | 登出 | success | `user` / UserUID | `{}` |
 | `setting.update` | 修改系统设置 | success/failed | `setting` / 空 | `{Keys, Before, After}`（**密钥类键不记值，只记 `{Changed:true}`**） |
 | `system.log.cleanup` | 日志清理任务自身（§5.5） | success/failed | `system` / 空 | `{DeletedOperationLogs, DeletedJobLogs, RetentionDays}` |
-| `system.recount` | 配额对账发现偏差（§3.5） | success/failed | `system` / 空 | `{FixedUsers, FixedAlbums, MaxDelta}` |
+| `system.recount` | 配额对账发现偏差（§3.5） | success/failed | `system` / 空 | `{FixedUsers, MaxDelta}` |
 | `theme.install` | 安装主题（zip 上传成功） | success/failed | `theme` / ThemeID | `{Name, Version, PackageBytes, Overwrite}` |
 | `theme.uninstall` | 卸载主题 | success/failed | `theme` / ThemeID | `{Name, Version}` |
 | `theme.activate` | 启用 / 切换主题 | success/failed | `theme` / ThemeID | `{Previous, Active, Pages}` |
@@ -760,7 +757,7 @@ reconcile():
 
 | 项 | 内容 |
 |---|---|
-| **前端主体** | **内置 SPA**：`go:embed web/dist` 编进二进制。图库、上传、相册、任务、日志、设置、**登录页**、**后台**全部由它渲染 |
+| **前端主体** | **内置 SPA**：`go:embed web/dist` 编进二进制。图库、上传、任务、日志、设置、**登录页**、**后台**全部由它渲染 |
 | **「主题」** | 一组可替换的**前端代码**（`index.html` + `assets/`），作者可用任意技术栈 |
 | **注册机制** | 默认主题只注册 `["/"]` → **只有首页 `/` 走主题**；其它业务页面（`/upload`、`/gallery`…）**可被任何主题注册**，无需改 Go |
 | **扩展预留** | 接管范围写在 `manifest.Pages` 里，**Go 的分发逻辑一次性写通用**。将来某主题声明 `["/", "/gallery"]`，`/gallery` 自动改走主题——**Go 零改动**（D77 原则） |
@@ -798,14 +795,18 @@ reconcile():
 ```
 启动时：
   1. 确保 <dataDir>/themes/ 存在（缺则 MkdirAll）
-  2. 若该目录「为空」（没有任何子目录）
-       → 把内嵌的默认主题解压一份到 <dataDir>/themes/default/
-       → INFO 日志 "seeded embedded default theme"
+  2. 若该目录「为空」（没有任何子目录），按以下优先级取默认主题（D100）：
+       ① PICGO_WEB_THEME_SEED 指定的本机目录（部署侧完全控制）
+       ② theme.defaultGitURL（默认 https://github.com/Yeqingky/PicGo-Web-Theme.git，
+          浅克隆 + 与 zip 相同的清单校验；失败仅告警并继续下一条）
+       ③ 内嵌副本（随二进制发布；离线部署 / Git 不可达时兑底）
+       → INFO 日志标明实际使用的 seed 源
      若非空 → **什么都不做**（绝不覆盖用户放进去的主题）
   3. 继续 §8.4 的扫描
 ```
 
 **运维含义**：升级只需重跑容器 / 替换二进制；用户自己的主题留在 `data/` 卷里**不受影响**。
+离线部署可把 `theme.defaultGitURL` 置空禁用 Git seed（直接用内嵌副本）。
 
 ### 8.4 扫描与校验
 
@@ -975,7 +976,7 @@ DELETE /api/web/v1/uploads/{uid}?DeleteRemote=true|false
    - 本人 → 放行
    - admin → 放行
    - 其他 → 40301
-② 读取 Uploads 行（含 Size / StorageUID / UserUID / AlbumUID）
+② 读取 Uploads 行（含 Size / StorageUID / UserUID）
    并读取 UploadResults.RawOutput + FilePath
    ⚠️ 必须在删除两张表之前读完 —— 删完就拿不到了（D47 的硬性前提）
 ③ 远端删除（仅当 DeleteRemote=true）
@@ -994,11 +995,10 @@ DELETE /api/web/v1/uploads/{uid}?DeleteRemote=true|false
    - DELETE UploadResults WHERE UploadUID = ?
    - DELETE Uploads         WHERE UID = ?
    - Users.UsedBytes     -= Size（不为负，见 §3.3）
-   - Albums.ImageCount   -= 1（若 AlbumUID 非空）
 ⑤ 若 UploadResults.FilePath 存在且 upload.keepLocalCopy=false → 删除本地暂存文件
    （删除失败只记 WARN，不影响结果）
 ⑥ 写 OperationLogs：Type = image.delete
-   Detail = {DeleteRemote, RemoteDeleted, Reason, StorageUID, Size, AlbumUID}
+   Detail = {DeleteRemote, RemoteDeleted, Reason, StorageUID, Size}
 ```
 
 ### 9.2 关键取舍
@@ -1029,7 +1029,7 @@ DELETE /api/web/v1/users/{uid}（admin）
 ② 遍历该用户全部 Uploads（分页，每批 100）
    对每一张走 §9.1 的删除流程（含配额退还、单条 image.delete 日志）
    → 这就是「必须走同一条流程」的含义：不允许写一条 DELETE FROM "Uploads"
-     否则配额与相册计数会漂移，日志也无从追溯
+     否则配额会漂移，日志也无从追溯
 ③ 删除用户侧数据（顺序无关，建议如下）：
    UserSettings → APITokens → RefreshTokens → OAuthIdentities
    → UserProfiles → LoginAttempts（按 Email 清理）
@@ -1064,7 +1064,7 @@ DELETE /api/web/v1/users/{uid}（admin）
 
 | 层 | 位置 | 失败时的行为 |
 |---|---|---|
-| 构建期 | `deploy/docker/Dockerfile` | 断言 dist 含 `contextData` → **构建失败** |
+| 构建期 | 根目录 `Dockerfile` | 断言 dist 含 `contextData` → **构建失败** |
 | 运行时 | `picgo-agent/src/picgo/patch.ts` → `/healthz.Patches` | 缺失时 `agent.StatusHolder.PatchesComplete() = false` |
 
 `UploadService.concurrency()` 会读它：**补丁不全就把并发强制降到 1**，
@@ -1248,17 +1248,16 @@ Go 订阅 agent SSE（internal/agent 的常驻 reader）
 
 ### 11.4 前端两个页面的分工
 
-| | 「任务」面板 | 「操作日志」页 |
+| | 「任务」面板 | 管理员「全部日志」页 |
 |---|---|---|
-| 数据源 | `GET /api/web/v1/jobs` + SSE | `GET /api/web/v1/logs` |
-| 展示 | 进行中/最近批次，带进度条、逐行日志抽屉 | 审计流水，带类型徽章、成功/失败、可搜索 |
+| 数据源 | `GET /api/web/v1/jobs` + SSE | `GET /api/web/v1/logs`（仅 admin） |
+| 展示 | 进行中/最近批次，带进度条、逐行日志抽屉 | 全站审计流水，带类型徽章、成功/失败、可搜索 |
 | 排序 | 进行中优先，然后 `CreatedAt DESC` | `CreatedAt DESC` |
 | 操作 | 重试失败项、清理已完成任务 | 只看（只读视图） |
 | 邮件 | 不展示 | 邮件日志单独 Tab（`GET /api/web/v1/logs/emails`） |
 
-> 常见混淆点：用户上传失败时，**两个页面都会有记录**——
-> 「任务」里看到 `failed` 的 Job 与具体报错行，「操作日志」里看到一条 `upload` / `failed`。
-> 这**不是重复**，而是刻意的分工（§5.1）。前端应在两个页面互相给出跳转链接。
+> 普通用户可以查看自己任务的状态与任务日志, 但不能查看 `OperationLogs` 或 `EmailLogs`。
+> 管理员可在「任务」与「全部日志」页分别查看执行细节和全站审计记录。
 
 ### 11.5 健康与自检
 
@@ -1309,7 +1308,7 @@ Go 订阅 agent SSE（internal/agent 的常驻 reader）
 | 10 | 改 `PicgoConfigName` 会因 `createOrUpdate` 语义产生重复配置，且 `UID` 会变、需迁移引用 | ✅ **裁决：`PicgoConfigName` 创建后只读**；`Name` 仅作展示（符合 D64：UID 为唯一标识、Name 仅展示）。`PATCH` 不接受该字段。本文 §7.2 已按此写 |
 | 11 | §3.5 曾提出配额对账端点 `POST /system/maintenance/recount`，`API.md` 未定义 | ✅ **裁决：不新增端点**。改为**随每日维护任务静默对账**，仅在发现偏差时写日志（与 D82「不做备份/恢复」同一取向）。本文 §3.5 已按此写 |
 | 12 | **命名规范变更（D81）**：全部表名列名与 API 字段由 snake_case 改为 **PascalCase** | ✅ 本文已全文采用 PascalCase（`Uploads.UID` / `Users.UsedBytes` / `JobItems.Attempts` …）。**例外保持不变**：Lsky 兼容层（snake_case + `{status, message, data}`）、环境变量、配置键（`dot.lowerCamel`）、picgo 侧键名（`picBed` / `_configName`）、枚举取值（`upload` / `system.log.cleanup`） |
-| 13 | **`DATA-MODEL.md` §4.3 的相册路径注解曾经过时**：旧文写「对外路径为 `/api/v1/gallery/albums`（`/api/v1/albums` 保留给 Lsky）」 | ✅ **已闭环**：按 D80，内部 API 前缀迁至 `/api/web/v1` 后内部相册路径为 **`/api/web/v1/albums`**，**不再有 `gallery/` 中间段**。本文按 D80 写（§1.3 第 ③ 步等处用 `/api/web/v1/albums/{uid}/move-uploads`）。已核实 `DATA-MODEL.md` §4.3 的注解已同步修正 |
+| 13 | **`DATA-MODEL.md` §4.3 的相册路径注解曾经过时**：旧文写「对外路径为 `/api/v1/gallery/albums`（`/api/v1/albums` 保留给 Lsky）」 | ✅ **已闭环**：按 D80，内部 API 前缀迁至 `/api/web/v1`。后续相册功能整体移除（D101），相关路径与注解均已删除 |
 | 14 | **`DECISIONS.md` 部分历史条目的行文仍用 snake_case**（如 D20 的 `users.capacity_bytes`、D22 的 `storage_configs.updated_at`、D64 的 `storage_configs.uid`） | ✅ **非冲突**：按「新决策追加编号、不改历史条目」的维护规则，历史条目保持原样；**表结构一律以 `DATA-MODEL.md` 为准**（已全部 PascalCase）。本文所有表列引用均按 DATA-MODEL 书写 |
 | 15 | **主题范围变更（D94–D99）**：先前设计为「前端整体以主题形式交付、**不内置**」，现改为「**前端内置**（`go:embed web/dist`）+ **主题只接管 `manifest.Pages` 声明的路径**，**默认主题只注册首页**」；并新增 `ThemeConfigs` 独立表、`Pages` 自行注册机制、以及「**认证页与 `/admin/**` 永久保留**」的安全默认值 | ✅ **本文已整体按最终定义重写**：**新增 §8 全节**（职责边界 / 磁盘布局 / 启动 seed / 扫描校验 / 请求分发 / 资源托管 / 兜底降级 / 配置读写 / zip 九条校验 / 切换生效 / 运维要点）；§0 总览与「命名与路径约定」已补行；§5.3 已补 **7 个 `theme.*` 日志类型**；§12 速查表已增 3 行。**已彻底移除**的服务端内容：`site.background.*` 全套键、`site/background` 端点、ACG 直链缓存与定时任务、「背景图三种模式」——按 D97 背景图改为**主题配置项 `BackgroundURL` 单一 URL，不做任何判断** |
 | 16 | **本文小节编号因新增 §8 而后移**（删除流程 §8→**§9**、PicGo-Core 补丁 §9→**§10**、日志与可观测性 §10→**§11**、运维速查表 §11→**§12**） | ✅ 本文**内部**交叉引用已同步更新（含 §5.5、§7.2、§8.4/§8.9 的内部指向与 §12 速查表中的 `§10.4`）。⚠️ **`docs/README.md` 中按序号引用本文的地方需同步**：其「改存储驱动 / 插件」一行写的是 `OPERATIONS.md §7–§8`，重编号后 **§7 仍是「存储驱动同步」，但 §8 已变为「主题系统」**（删除流程现为 §9）→ 建议改为 `§7` 与 `§9`。**本次仅被授权写 `OPERATIONS.md`，故在此登记** |

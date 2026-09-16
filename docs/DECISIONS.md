@@ -404,7 +404,7 @@ type OperationLog struct {
 | `plugin.install` / `plugin.uninstall` / `plugin.update` | 插件操作 |
 | `auth.login` / `auth.logout` / `auth.failed` | 登录相关 |
 | `image.delete` | 删除图片 |
-| `image.update` | 重命名 / 移动相册 |
+| `image.update` | 重命名 |
 
 > 与上传队列的 `Jobs` / `JobLogs` 区分：`Jobs` 是**任务执行过程**（含实时进度与逐行日志）；
 > `OperationLogs` 是**审计级结果记录**（一次操作一条，只记结果与关键上下文）。
@@ -645,7 +645,7 @@ type OperationLog struct {
 2. **环境变量不变**（仍为 `UPPER_SNAKE_CASE`）：`PICGO_WEB_LISTEN`、`PICGO_WEB_DB_DRIVER` …
 3. **`settings` 配置键不变**（仍为 `dot.lowerCamel`）：`site.name`、`upload.rateLimit.perHour` …
    它只是 KV 表的字符串 key，不是列名，改它得不偿失。
-4. **URL 路径段保持小写复数**：`/api/web/v1/storage/configs`、`/uploads`、`/albums`、`/logs`
+4. **URL 路径段保持小写复数**：`/api/web/v1/storage/configs`、`/uploads`、`/logs`
    （避免大小写敏感的代理/中间件问题）。
 5. **picgo 侧字段名一律跟随 picgo-core，不改**：
    `_id` / `_configName` / `picBed` / `picgoPlugins` 等保持原样。
@@ -775,7 +775,7 @@ gorm.Open(dialector, &gorm.Config{
 | 范围 | 页面 |
 |---|---|
 | **公开**（无需登录） | `/`（首页）、`/login`、`/forgot-password`、`/reset-password`、`/first-login` |
-| **需登录** | `/upload`、`/gallery`、`/gallery/:uid`、`/albums`、`/jobs`、`/settings`、`/logs` |
+| **需登录** | `/upload`、`/gallery`、`/gallery/:uid`、`/jobs`、`/settings`、`/logs` |
 | **需管理员** | `/admin/users`、`/admin/storage`、`/admin/plugins`、`/admin/site`、`/admin/logs` |
 
 - **没有游客上传**（与 D40/D73 一致：限流按登录用户计量）
@@ -815,7 +815,7 @@ gorm.Open(dialector, &gorm.Config{
 | **名称** | 仍然叫**主题** |
 | **本质** | 主题是**可选的页面覆盖层**，不是「另一套完整前端」 |
 | **注册方式** | 主题在 `manifest.json` 里用 `Pages` **自行注册**要接管的页面（精确路径列表） |
-| **可注册的页面** | `/`（首页）、`/upload`（上传页）、`/gallery`（图库）、`/albums`、`/jobs`、`/logs`、`/settings` 等**业务页面** |
+| **可注册的页面** | `/`（首页）、`/upload`（上传页）、`/gallery`（图库）、`/jobs`、`/logs`、`/settings` 等**业务页面** |
 | **不可注册（永久保留）** | `/login`、`/first-login`、`/forgot-password`、`/reset-password`、`/logout`、`/admin/**` —— **安全底线，代码硬编码，manifest 声明无效** |
 | **默认主题** | 只注册 `["/"]`（首页） |
 | **实现方式** | Go 的分发逻辑**与具体页面无关**，只看 `Pages`；因此「支持哪些页面」**由主题自己决定** |
@@ -828,7 +828,6 @@ gorm.Open(dialector, &gorm.Config{
 | 首页（落地页） | `/` | ✅ | 默认主题注册的就是它 |
 | 上传页 | `/upload` | ✅ | |
 | 图库 | `/gallery`、`/gallery/:UID` | ✅ | 用 `/gallery` 前缀即可覆盖子路径 |
-| 相册 | `/albums` | ✅ | |
 | 任务 | `/jobs` | ✅ | |
 | 操作日志 | `/logs` | ✅ | |
 | 个人设置 | `/settings` | ✅ | |
@@ -1201,7 +1200,7 @@ type ThemeConfig struct {
 ```
 身份鉴权  Users / UserProfiles / OAuthIdentities / RefreshTokens / APITokens / LoginAttempts
 存储配置  StorageConfigs / StorageSecrets
-媒体资源  Uploads / UploadResults / Albums
+媒体资源  Uploads / UploadResults
 任务执行  Jobs / JobItems / JobLogs
 审计记录  OperationLogs / EmailLogs
 系统配置  SystemSettings / UserSettings
@@ -1242,7 +1241,7 @@ type ThemeConfig struct {
 |---|---|---|
 | `docker-compose.yml` | **用户** | 唯一对外部署方式。默认全部内置（Go + agent + SQLite） |
 | `docker-compose.pgsql.yml` | 用户（可选） | 覆盖文件，切 PostgreSQL |
-| `deploy/docker/Dockerfile` | 构建 | 多阶段：前端构建 → agent 构建 → Go 编译（`CGO_ENABLED=0`）→ 运行时 |
+| `Dockerfile`（根目录） | 构建 | 多阶段：前端构建 → agent 构建 → Go 编译（`CGO_ENABLED=0`）→ 运行时 |
 | `README.md` | 用户 + 开发 | 部署**只写 docker compose**；开发/测试命令单独一节 |
 
 - 镜像内**包含 Node 运行时**（agent 需要），不用无头 Electron
@@ -1269,3 +1268,291 @@ type ThemeConfig struct {
 - 管理员：能看全部，但 UI 上必须**把「我的图片」与「全部用户图片」明确分开**
   （两个页面，或同页面顶部按钮切换）——避免误操作他人的图
 - 具体形态已定：**同一页面 + 顶部 Tab 切换**（D71）
+
+### D100 ✅ 主题 Git 安装通道 + 默认主题源码分离到独立仓库
+
+**背景**
+
+1. 默认主题（首页落地页）此前只有两份手工维护的副本：二进制内嵌兜底副本（`server/internal/theme/embedded/`）与 `themes/`（gitignore 的运行时产物），没有独立源码仓库，主题与主仓库的发布节奏被绑死。
+2. zip 安装（D96）要求用户本地打好包再上传；对「主题仓库就在 GitHub 上」的常见场景多了一步手工操作。
+
+**决定**
+
+1. **新增「从 Git 安装」通道**：复用既有端点 `POST /api/web/v1/themes/install`（admin），按 `Content-Type` 分发 —— `multipart` 走 zip（D96），`application/json`（`{ URL, Overwrite }`）走 Git。不拆两个端点：资源相同（「装一个主题」），差异只在来源载体。
+   - **仅支持 `https://`**：拒绝 `http` / `file://` / `ssh` / scp 语法 / URL 内嵌凭据（容器内通常无对应凭据，且本系统不留存 Git 凭据）；
+   - `git clone --depth 1 --single-branch`（子模块不递归）到临时目录 → **与 zip 完全同一套清单校验**（manifest 七项 + index.html + 文件数/体积限额）→ 跳过 `.git` 复制 → 原子替换；
+   - `GIT_TERMINAL_PROMPT=0` + `GIT_ASKPASS=echo`（凭据缺失立即失败不挂起）；单次克隆总时长上限 2 分钟；同步返回（不建 job）。
+   - 审计与 zip 共用 `theme.install` 类型，`Detail.Via=git` 区分来源。
+2. **默认主题源码独立仓库**：https://github.com/Yeqingky/PicGo-Web-Theme（manifest + index.html 在仓库根）。
+   - 主仓库二进制内的内嵌兜底副本由 `make theme-sync`（`scripts/sync-default-theme.sh`）从主题仓库同步后提交；
+   - **seed 优先级变更**（§8.3）：`PICGO_WEB_THEME_SEED` 目录 → `theme.defaultGitURL`（Git 拉取，新 settings 键，默认官方仓库，可置空禁用）→ 内嵌副本（最后兜底，离线/不可达时回落，**永不白屏原则不变**）；
+   - manifest 规范（D98）不变：主题必须在仓库根，`.git` 不属于主题内容。
+3. 运行时依赖：容器（生产镜像 / dev / e2e）内安装 `git`。
+
+**代价与边界**
+
+- Git 通道只在**安装时**拉取一次，不做「跟随上游自动更新」——升级主题 = 重新 install（Git/覆盖，D100），行为可预期；
+- 私有仓库不支持（无凭据留存）；如需私有主题，部署到内网 Git 后按 https 匿名镜像访问，或继续用 zip。
+
+### D101 ✅ 移除相册功能（Albums）
+
+**背景**
+
+相册（`Albums` 表 + `/albums` 页 + 上传/图库里的归类入口）定位是「整理图片」的手段（D55 曾定「相册 + 重命名」）。
+实际上本项目图片数量小、外链即图床 URL，相册带来的整理收益不抵它引入的复杂度
+（冗余计数、跨表联动、前后端一整套 CRUD）。主人决定直接移除。
+
+**决定**
+
+1. **功能整体移除**：`Albums` 表、`Uploads.AlbumUID` 列、内部 `/api/web/v1/albums/**` 端点、
+   前端 `/albums` 页与图库/上传页的相册入口全部删除。
+2. **数据库不做兼容**（项目尚未发正式版，无存量部署）：初始迁移直接改为 **20 张表**，
+   不留 `Albums` 表与 `AlbumUID` 列，也不加「DROP TABLE」式的后续迁移。
+3. **Lsky 兼容层保留伪造响应**（`/api/v1/albums` 属外部冻结的保留路径，D80）：
+   - `GET /api/v1/albums` 恒返回空列表；
+   - `DELETE /api/v1/albums/{id}` 恒返回成功；
+   - `POST /upload` 的 `album_id` 与 `GET /images` 的 `album_id` 参数**收下但忽略**；
+   - `GET /profile` 的 `albumNum` 恒为 `0`。
+   目的：PicGo 桌面端等客户端拉相册列表/传参时不报错（它们把路径硬编码在代码里）。
+4. 整理图片的手段回归「**重命名（AliasName）+ 筛选**」（D55 的「相册」部分由本条取代）。
+5. 配置键 `upload.defaultAlbumUID` 一并移除；`al_` UID 前缀退役。
+
+**影响面**
+
+后端 `model/repository/service/handler`（相册三件套 + 图库/上传/用户统计的联动）、
+前端（`features/albums/`、图库筛选与移动对话框、上传页相册选择）、主题可注册页面清单、
+`scripts/e2e-lsky.sh`（相册用例改为断言伪造响应）。
+
+### D102 ✅ 概览页固定 `/overview`，内置 SPA 不占用 `/`
+
+**背景**
+
+`/` 在生产环境由**当前主题**渲染（D94/D99.1：默认主题 `Pages = ["/"]`，Go 分发在第 3 步就把它交给主题）。
+但内置 SPA 的侧边栏「概览」此前指向 `/`，于是点「概览」会跳到**主题首页**（没有 AppShell 侧边栏），
+表现为「概览页与首页冲突」。登录后默认跳转、已登录访问 `/login`、错误页「返回」也都指向 `/`，同样落到主题首页。
+
+**决定**
+
+1. **概览页固定 `/overview`**：内置 SPA 的登录后落地页，源码在 `web/src/features/overview/`（原 `features/home/`）。
+2. **`/` 完全归主题**：内置 SPA 不再渲染 `/`，只在 SPA 内部把 `index` 路由 `<Navigate to="/overview" replace />`。
+   - 生产环境该重定向不可达（`/` 已被主题接管）；
+   - 仅 Vite dev server（无 Go 分发层）会命中，属开发便利。
+3. **所有「回控制台」的默认目标改为 `/overview`**：登录成功默认跳转、`RequireAnonymous`（已登录访问登录页）、
+   403/404 页的「返回」按钮。`/` 不再出现在这些位置。
+4. **导航配置** `lib/navigation.ts` 的 `NAV_HOME` → `/overview`，不再需要 `exact`。
+5. `RequireAuth` 的 redirect 逻辑保持原样：未登录访问 `/` 不带 `redirect` 参数直接去 `/login`
+   （`/` 是公开的主题首页，不需要登录后再回跳）。
+
+**边界**
+
+- 概览页属于**内置 SPA**，其路径 `/overview` **可被主题接管**（与 `/upload` 等一致，D94.2 只禁止认证页与 `/admin/**`）；
+  但主题不应接管它 —— 概览是控制台内部页面。
+- 默认主题 `Pages` 仍为 `["/"]`，Go 端分发逻辑**零改动**。
+
+**影响面**
+
+`web/src/router.tsx`、`web/src/lib/navigation.ts`、`web/src/components/layout/route-guards.tsx`、
+`web/src/components/layout/error-pages.tsx`、`web/src/features/auth/login-page.tsx`、
+`web/src/features/overview/`、i18n key `OVERVIEW_PLACEHOLDER_*`（取代 `HOME_DEV_PLACEHOLDER_*`）。
+
+### D103 ✅ 概览页内容与数据来源（对齐 lsky-pro / skyImage 的仪表盘）
+
+**背景**
+
+D102 把概览页固定到 `/overview` 之后，页面本身还是占位文案。需要补上真正的仪表盘内容。
+主人指定**参考 `lsky-org/lsky-pro` 与 `nxtcorex/skyImage` 的实现**，不参考其它来源。
+
+**两边实际做了什么**（读源码得出的结论）
+
+| 项目 | 页面 | 内容 |
+|---|---|---|
+| lsky-pro | 用户仪表盘 `user/dashboard.blade.php` | **图片数量 / 可用储存 / 使用储存 / 总储存** 四卡 + 可使用的策略列表 + 我的信息（姓名/邮箱/注册时间/IP）+ 角色组信息（最大文件、并发、每分钟~每月上传限制） |
+| lsky-pro | 管理员控制台 `admin/console/index.blade.php` | 图片数量 / 相册数量 / 用户数量 / 占用储存 + **今日/昨日/本周/本月上传** + 近 30 天 ECharts 折线（游客上传/用户上传/新用户）+ 系统情况（OS/PHP/上传限制）+ 软件信息 |
+| skyImage | 用户 Dashboard | 容量上限 / 已用 / 剩余 / 今日状态 四卡 + **SVG 配额圆环**（含上限/已用/剩余三栏）+ 用户趋势图 |
+| skyImage | AdminConsole | 用户数 / 文件数 / 存储用量 三卡 + 管理员趋势图 |
+
+**决定**
+
+1. **概览页 = 资源卡片 + 配额 + 趋势 + 我的信息**（`web/src/features/overview/`）：
+   - 四卡：**存储用量 / 图片总数 / 今日上传 / 进行中任务**。前三项来自两边的共识；第四项用「进行中任务」替代 lsky 的「总储存」（后者与配额卡重复）。
+   - **配额区块**：`QuotaDonut`（学 skyImage 的 SVG 圆环）+ 已用/剩余/上限三栏（学 lsky 的四卡拆解）。`CapacityBytes = 0` 显示「不限额」（D20）。
+   - **近 30 天趋势**：柱状图 + 数量/体积切换 + 合计/单日峰值。数据用后端已有的 `Trend`（不新增端点）。
+   - **我的信息**：昵称 / 邮箱 / 角色 / 注册时间 / 最近登录（学 lsky 的「我的信息」卡）。
+2. **管理员额外两个区块**：**站点概况**（用户总数/启用/禁用/管理员，来自 `Users`）+ **按存储分布**（`ByStorage`）。两者依据 `Role === 'admin'` 渲染，数据侧由后端裁剪。
+3. **明确不照搬的部分**：
+   - lsky 的**角色组信息**（最大文件、并发数、每分/时/日/周/月限制）—— 本项目无用户组（D53），限流是全局配置；
+   - lsky 的**系统情况 / 软件信息**（OS、PHP 版本、上传限制）—— 那是 `/admin/site → 关于` 的内容，且本项目是 Go 单二进制；
+   - lsky 的**相册数量**、**游客上传**系列 —— 相册已移除（D101），本项目无游客上传（D25 无自助注册、所有上传需登录）；
+   - skyImage 的 **shop / 会员 / 工单**相关卡片 —— 本项目明确不做商业化（D60/D88/D90）。
+4. **不引入图表库**（延续 DESIGN.md §1「不引入第三方组件库」）：趋势图为自写 SVG + HTML 覆盖层。
+5. **不新增后端端点**：复用 `GET /api/web/v1/system/stats`（W5 已实现）。**唯一改动**是把它文档里本就声明的角色裁剪写进前端类型：`Users` / `ByStorage` 标记为可选（普通用户的响应里没有这两个字段）。
+
+**边界**
+
+- 概览页**只读**，不做任何写操作（刷新、跳转除外）。
+- 配额数据取自登录态 `User`（`CapacityBytes` / `UsedBytes`），趋势与计数取自 `system/stats`；两者不一致时以登录态为准（它由 `/auth/me` 刷新）。
+
+**影响面**
+
+`web/src/features/overview/`（页面 + 4 个组件）、`web/src/types/api.ts`（`SystemStats` 字段可选化）、
+`web/src/i18n/locales/*.json`（`OV_*` 共 40 余个 key）、`web/src/mocks/handlers-w8.ts`（补 `/system/stats` mock）、
+`docs/DESIGN.md`（新增 §4.4）、`docs/API.md`（§10 补角色裁剪说明）。
+
+### D104 ✅ 操作日志仅管理员可见
+
+**背景**
+
+原有 `/logs` 页面向普通用户展示自己的 `OperationLogs`, 与管理员 `/admin/logs` 重复且暴露了不必要的审计信息.
+
+**决定**
+
+1. 删除内置 SPA 的普通用户 `/logs` 路由, 同时移除侧栏和用户菜单入口; 普通用户直接访问 `/logs` 不渲染日志页面.
+2. 保留 `/admin/logs` 作为唯一操作日志界面, 仅 `Role = admin` 可访问, 展示全站 `OperationLogs` 与 `EmailLogs`.
+3. `/api/web/v1/logs/**` 的所有端点继续统一挂载 `RequireAdmin`; `OperationLogs` 仍保留在数据库中用于审计, 不是删除写入能力.
+4. `/jobs/{Uid}/logs` 属于任务执行日志, 仍按任务权限提供, 不与操作日志混同.
+
+**影响面**
+
+`web/src/router.tsx`、`web/src/lib/navigation.ts`、`web/src/components/layout/user-menu.tsx`、
+`web/src/features/logs/logs-page.tsx`、`docs/DESIGN.md`、`docs/API.md`、`docs/ARCHITECTURE.md`、
+`docs/OPERATIONS.md`。
+
+### D105 ✅ SSE 断线状态移至侧栏底部
+
+**背景**
+
+内容区顶部的断线提示会改变页面布局并打断当前操作。Immich 风格的侧栏底部状态区已经同时承担存储空间信息, 适合放置连接状态与版本信息。
+
+**决定**
+
+1. 侧栏底部显示存储空间卡片、使用进度、服务器在线 / 离线状态和当前 PicGo-Web 版本.
+2. SSE `open` 显示绿色「服务器在线」; `connecting` 显示连接中; `reconnecting` / `closed` 显示红色「服务器离线」.
+3. 移除内容区顶部的「实时连接已断开，正在重连…」提示条; SSE 仍按原策略自动重连, 任务状态继续由共享连接驱动.
+4. 侧栏收起时仅保留存储与连接状态图标, 移动端抽屉沿用展开样式.
+
+**影响面**
+
+`web/src/components/layout/app-shell.tsx`、`web/src/components/layout/sidebar.tsx`、
+`web/src/components/layout/sidebar-footer.tsx`、`web/src/components/layout/quota-bar.tsx`、
+`web/src/store/task-store.ts`、`web/src/lib/sse.ts`、`web/src/i18n/locales/*.json`、
+`docs/DESIGN.md`、`docs/OPERATIONS.md`。
+
+### D106 ✅ 图库多选操作框与顶部范围 Tab 同行右对齐
+
+**背景**
+
+图库多选后的操作条独占筛选区上方整行, 会把筛选条件与范围切换拉开。管理员的「我的图片 / 全部图片」Tab 与多选操作属于同一组上下文操作, 应保持在同一行。
+
+**决定**
+
+1. 多选操作框移动到管理员范围 Tab 的右侧, 并通过 `ml-auto` 右对齐.
+2. 操作框保留已选数量、复制链接、删除和清除选择操作.
+3. 在窄屏下允许自动换行, 不改变普通用户无范围 Tab 时的多选能力.
+4. Tab 与操作框所在容器使用 `min-h-10`, 操作框使用 `h-10`, 避免选中状态改变这一行高度.
+
+**影响面**
+
+`web/src/features/gallery/gallery-page.tsx`、`docs/DESIGN.md`。
+
+### D107 ✅ 图库多选操作仅保留图标
+
+**背景**
+
+多选操作框需要保持紧凑, 操作含义已可由图标与悬浮提示表达, 无需重复显示文字按钮。
+
+**决定**
+
+1. 复制链接操作保留复制图标, 通过 `aria-label` 与 `title` 保持可访问性.
+2. 删除操作保留删除图标与可访问名称.
+3. 移除多选操作框中的「清除选择」按钮; `Esc` 与其它既有选择逻辑仍可清除选择.
+
+**影响面**
+
+`web/src/components/common/link-copy-menu.tsx`、`web/src/features/gallery/gallery-page.tsx`、
+`docs/DESIGN.md`。
+
+### D108 ✅ 移除站点设置页首页与背景图引导提示
+
+**背景**
+
+首页与背景图已经由主题设置管理, 站点设置页中的重复引导文案会增加噪声。
+
+**决定**
+
+1. 移除站点设置页关于首页与背景图位置的 Alert 提示.
+2. 站点设置页描述只保留站点、邮件、登录方式与安全策略.
+3. 保留主题管理中的实际配置入口与相关文档说明.
+
+**影响面**
+
+`web/src/features/admin/site/admin-site-page.tsx`、`web/src/i18n/locales/*.json`、
+`web/scripts/i18n-w8.py`、`docs/DESIGN.md`。
+
+### D109 ✅ HTTP 401 与 SSE 重连复用会话刷新
+
+**背景**
+
+后端鉴权失败使用 HTTP 401 携带统一错误信封。Axios 默认会将这类响应交给 rejected handler;
+如果只在 HTTP 200 分支处理 `Code=40102/40103`, access token 过期时不会触发刷新。
+同时 `EventSource` 的 `error` 事件不暴露 HTTP 状态码, SSE 重连无法直接判断 access token 是否过期。
+
+**决定**
+
+1. HTTP 客户端同时在 HTTP 401 与 HTTP 200 错误信封中处理 `40102` / `40103`, 通过单飞的
+   `POST /auth/refresh` 获取新令牌并重放原请求。
+2. SSE 断线重连前请求 `GET /auth/me`; 该请求复用 HTTP 客户端, 仅在 access token 失效时使用
+   refresh token 刷新, 普通网络故障不无条件轮换 refresh token。
+3. 刷新失败时清除登录态并停止 SSE 重连; 服务暂时不可用时保留指数退避重连。
+
+**影响面**
+
+`web/src/lib/http.ts`、`web/src/lib/sse.ts`、`web/src/store/auth-store.ts`、
+`docs/API.md`、`docs/ARCHITECTURE.md`、`docs/DESIGN.md`。
+
+### D110 ✅ 操作日志类型使用稳定值, 展示文案由前端 i18n 映射
+
+**背景**
+
+`OperationLogs.Type` 已经是用于查询与审计的稳定字符串枚举, 但 `/logs/types` 额外返回中文 `Label`,
+导致英文界面仍显示中文, 也让接口同时承担了数据标识与语言文案两种职责。
+
+**决定**
+
+1. 数据库 `OperationLogs.Type`、日志对象的 `Type`、`GET /logs/types` 的 `Type` 与筛选参数使用同一稳定值,
+   例如 `upload`、`image.delete`、`theme.install`。
+2. 后端不保存或返回本地化类型名称; `/logs/types` 只返回 `Type` 与 `TargetType`。
+3. 内置 SPA 在 `web/src/i18n/log-types.ts` 中把稳定值映射到 `LOG_TYPE_*` i18n key,
+   列表、筛选器与详情统一使用当前语言展示; 未知值降级显示而不崩溃。
+
+**影响面**
+
+`server/internal/model/audit.go`、`server/internal/service/log_service.go`、`web/src/i18n/log-types.ts`、
+`web/src/features/logs/operation-logs-panel.tsx`、`web/src/i18n/locales/*.json`、`docs/API.md`。
+
+### D111 ✅ 侧栏显示 GitHub 新版本提示
+
+**决定**
+
+1. 内置 SPA 请求 `https://api.github.com/repos/YeqingKy/PicGo-Web/releases/latest`, 只读取最新正式 Release 的 `tag_name`。
+2. 仅当远端版本严格高于当前 `Site.Version` 时, 在侧栏当前版本号右侧显示右对齐的「新版本!」链接, 点击打开 GitHub Release 页面。
+3. 没有正式 Release、当前版本高于或等于远端版本、网络请求失败、超时或版本格式无法识别时, 不显示提示。
+4. 检查失败不影响登录、导航和其它页面功能; 版本比较只在前端进行, 不写入数据库。
+
+**影响面**
+
+`web/src/hooks/use-latest-version.ts`、`web/src/components/layout/app-shell.tsx`、
+`web/src/components/layout/sidebar.tsx`、`web/src/components/layout/sidebar-footer.tsx`、
+`web/src/i18n/locales/*.json`、`docs/DESIGN.md`。
+
+### D112 ✅ 版本号支持基础版本与修复版本
+
+**决定**
+
+1. 版本格式为 `major.feature.patch`, 分别表示大版本、新功能和小更新。
+2. 修复版本使用 `major.feature.patch-fixN`, 例如 `0.1.0-fix1` 表示基于 `0.1.0` 的第 1 个错误修复版本。
+3. 比较时先比较三段基础版本; 基础版本相同则无后缀 < `fix1` < `fix2` ……。
+4. 不符合上述格式的当前版本或远端版本视为不可比较, 不显示新版本提示。
+
+**影响面**
+
+`web/src/hooks/use-latest-version.ts`、`docs/DESIGN.md`、`AGENTS.md`。

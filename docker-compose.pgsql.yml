@@ -36,6 +36,14 @@ services:
       POSTGRES_PASSWORD: "${PICGO_WEB_PG_PASSWORD:?请在 .env 中设置 PICGO_WEB_PG_PASSWORD}"
       TZ: "Asia/Shanghai"
     volumes:
+      # ⚠️ 用宿主目录挂载（bind mount），不用存储卷（named volume）。
+      #    容器内 postgres 用户的 uid/gid 是 **70:70**，宿主目录属主必须匹配，否则初始化失败：
+      #      # docker run --rm postgres:17-alpine id postgres
+      #      # → uid=70(postgres) gid=70(postgres)
+      #      # mkdir postgres_data
+      #      # chown 70:70 postgres_data && chmod 750 postgres_data
+      #    （镜像 entrypoint 以 root 启动时会自动 chown；但**手工预建目录时**请按上面操作，
+      #      尤其目录属主不是 root 或由非 root 用户预建的场景）
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U picgo -d picgo_web"]

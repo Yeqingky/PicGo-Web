@@ -79,6 +79,7 @@ func New(opts Options) (*Service, error) {
 	store := NewStore(StoreOptions{
 		ThemesDir:        opts.ThemesDir,
 		SeedFrom:         opts.SeedFrom,
+		DefaultGitURL:    defaultThemeGitURL(opts.Settings),
 		MaxManifestBytes: limits.MaxManifestBytes,
 		Log:              log,
 		Auditor:          auditor,
@@ -92,6 +93,17 @@ func New(opts Options) (*Service, error) {
 		auditor:      auditor,
 		fallbackOnce: newWarnOnce(),
 	}, nil
+}
+
+// defaultThemeGitURL 读取默认主题的 Git 源；未配置时回退官方仓库地址。
+func defaultThemeGitURL(sp SettingsProvider) string {
+	if sp == nil {
+		return DefaultThemeGitURL
+	}
+	if v := strings.TrimSpace(sp.GetString("theme.defaultGitURL")); v != "" {
+		return v
+	}
+	return DefaultThemeGitURL
 }
 
 // ThemesDir 返回主题根目录（供只读用途）。
@@ -720,6 +732,25 @@ func (s *Service) Screenshot(themeID string) ([]byte, string, error) {
 		return nil, "", err
 	}
 
+	if data, ctype, ok := readThemeScreenshot(th); ok {
+		return data, ctype, nil
+	}
+
+	// 旧版本已经 seed 到磁盘的 default 主题可能没有新加入的预览图。
+	// default 是内嵌兜底锚点，因此从内嵌副本补读，避免升级后后台卡片继续空白。
+	if th.ID == embeddedDefaultID && !th.Embedded {
+		if embedded, embErr := s.store.Embedded(); embErr == nil {
+			if data, ctype, ok := readThemeScreenshot(embedded); ok {
+				return data, ctype, nil
+			}
+		}
+	}
+
+	return nil, "", fmt.Errorf("%w: 主题 %s 没有预览图", ErrNotFound, th.ID)
+}
+
+// readThemeScreenshot 从一个已装载主题中读取预览图。
+func readThemeScreenshot(th *Theme) ([]byte, string, bool) {
 	candidates := make([]string, 0, 2)
 	if p := strings.TrimSpace(th.Manifest.Preview); p != "" {
 		candidates = append(candidates, p)
@@ -736,9 +767,9 @@ func (s *Service) Screenshot(themeID string) ([]byte, string, error) {
 		if err != nil {
 			continue
 		}
-		return data, contentType(rel), nil
+		return data, contentType(rel), true
 	}
-	return nil, "", fmt.Errorf("%w: 主题 %s 没有预览图", ErrNotFound, th.ID)
+	return nil, "", false
 }
 
 // ---- 公开信息（供 /site/config）----

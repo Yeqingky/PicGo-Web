@@ -5,9 +5,9 @@
  * 放在组件文件里会破坏 React Fast Refresh 的「只导出组件」约定。
  */
 
-/** 允许的图片扩展名（与后端 `upload.allowedExts` 默认值一致；后端仍会再校验一次）。 */
+/** 默认允许的图片类型（SVG 默认由后端禁止；后端仍会再校验一次）。 */
 export const DEFAULT_ACCEPT =
-  'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/svg+xml,image/x-icon,image/avif'
+  'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/x-icon,image/avif'
 
 /** 从 `DataTransfer` 里取文件（兼容 `items` 与 `files` 两种来源）。 */
 export function filesFromDataTransfer(dt: DataTransfer | null): File[] {

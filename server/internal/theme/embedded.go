@@ -53,49 +53,6 @@ func embeddedFile(name string) ([]byte, error) {
 	return fs.ReadFile(sub, name)
 }
 
-// seedIfEmpty 在 <themesDir> 为空时，写出默认主题到 <themesDir>/default/。
-//
-// 「为空」= 目录不存在，或没有任何子目录（忽略点开头的临时目录）。
-// 非空时**什么都不做** —— 升级只重跑容器，绝不覆盖用户放进去的主题（D94.4）。
-//
-// seedFrom 非空且存在时，从该目录复制（用于 `PICGO_WEB_THEME_SEED`：
-// 部署时把 `make theme` 产出的「完整版」默认主题种进去）；
-// 否则回退到**随二进制内嵌**的默认主题。
-//
-// 返回 (是否执行了 seed, 错误)。
-func seedIfEmpty(themesDir, seedFrom string) (bool, error) {
-	if err := os.MkdirAll(themesDir, 0o755); err != nil {
-		return false, fmt.Errorf("创建主题目录 %s 失败: %w", themesDir, err)
-	}
-
-	empty, err := dirHasNoSubdir(themesDir)
-	if err != nil {
-		return false, err
-	}
-	if !empty {
-		return false, nil
-	}
-
-	target := filepath.Join(themesDir, embeddedDefaultID)
-
-	// 优先使用外部 seed 源（若配置了且确实存在）
-	if src := strings.TrimSpace(seedFrom); src != "" {
-		if dirExists(src) {
-			if err := copyThemeDir(src, target); err != nil {
-				return false, fmt.Errorf("从 %s 复制默认主题失败: %w", src, err)
-			}
-			return true, nil
-		}
-		// 配置了但不存在：不静默忽略，明确告知（否则运维会以为生效了）
-		return false, fmt.Errorf("seed 源目录不存在: %s", src)
-	}
-
-	if err := writeEmbeddedTheme(target); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // copyThemeDir 把 src 目录的内容复制到 dst（权限位固定 0755 / 0644）。
 //
 // 每个条目都走 safeJoin 检查，因此即使 src 里被塞了符号链接也不会把内容

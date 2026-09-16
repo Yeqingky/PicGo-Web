@@ -133,7 +133,6 @@ export interface User {
   CapacityBytes: number
   UsedBytes: number
   ImageCount?: number
-  AlbumCount?: number
   /** 当前用户视图才有：是否设置了密码（纯 OAuth 用户为 false） */
   HasPassword?: boolean
   LastLoginAt: number
@@ -378,6 +377,8 @@ export type DriverConfigField = IPluginConfig
 export interface StorageCapabilities {
   SupportsPathTemplate: boolean
   SupportsRemoteDelete: boolean
+  /** 该图床是否无视传入文件名（服务端自行命名，如 NodeImage）——上传结果运行时探测回写 */
+  ServerRenames: boolean
   /** 该驱动声明的配置字段名（原样） */
   ConfigFields: string[]
   /** 推断 `SupportsPathTemplate` 的依据字段 */
@@ -506,8 +507,6 @@ export interface Upload {
   UID: string
   UserUID: string
   StorageUID: string
-  /** `""` = 未归入相册 */
-  AlbumUID: string
   /** 最终文件名（含扩展名，含魔法文件名结果） */
   FileName: string
   /** 原始上传文件名 */
@@ -545,8 +544,6 @@ export interface UploadListQuery extends PageQuery {
   /** 匹配 FileName / OriginalName / AliasName */
   Keyword?: string
   StorageUID?: string
-  /** 传 `none` 表示「未归入任何相册」 */
-  AlbumUID?: string
   Status?: UploadStatus
   /** `mine`（默认）/ `all`（仅管理员；普通用户传 all 会被静默降级） */
   Scope?: 'mine' | 'all'
@@ -572,14 +569,11 @@ export interface UploadQueueItemRef {
 export interface UploadFromUrlRequest {
   URLs: string[]
   StorageUID: string
-  AlbumUID?: string
 }
 
 /** `PATCH /uploads/{Uid}` 请求体 */
 export interface UpdateUploadRequest {
   AliasName?: string
-  /** 传 `""` 表示移出相册 */
-  AlbumUID?: string
 }
 
 /** `DELETE /uploads/{Uid}` 响应 */
@@ -652,61 +646,6 @@ export interface UploadLinksResponse {
   Format: LinkFormatName
   Text: string
   Items: { UID: string; URL: string }[]
-}
-
-// ---------------------------------------------------------------------------
-// 相册 Albums（API.md §5）
-// ---------------------------------------------------------------------------
-
-/** 相册（**没有标签功能**，D55：整理手段为「相册 + 重命名」） */
-export interface Album {
-  UID: string
-  UserUID: string
-  /** 预留给未来嵌套；当前恒为 `""` */
-  ParentUID: string
-  Name: string
-  Intro: string
-  /** `""` = 未设置封面 */
-  CoverUploadUID: string
-  /** 由 `CoverUploadUID` 解析出的直链，便于前端展示 */
-  CoverURL: string
-  /** 冗余计数 */
-  ImageCount: number
-  SortOrder: number
-  Metadata: Record<string, unknown>
-  CreatedAt: number
-  UpdatedAt: number
-}
-
-export interface AlbumListQuery {
-  Keyword?: string
-  Sort?: 'SortOrder' | 'CreatedAt' | 'ImageCount'
-  Order?: 'asc' | 'desc'
-}
-
-export interface CreateAlbumRequest {
-  Name: string
-  Intro?: string
-}
-
-export interface UpdateAlbumRequest {
-  Name?: string
-  Intro?: string
-  CoverUploadUID?: string
-  SortOrder?: number
-}
-
-/** `DELETE /albums/{Uid}` 响应 */
-export interface DeleteAlbumResponse {
-  Deleted: boolean
-  /** `WithUploads=true` 时，相册内图片仅脱离相册（不删除图片） */
-  DetachedUploads: number
-}
-
-/** `POST /albums[/{Uid}]/move-uploads` 响应 */
-export interface MoveUploadsResponse {
-  Moved: number
-  Skipped: number
 }
 
 // ---------------------------------------------------------------------------
@@ -920,8 +859,8 @@ export interface LogListQuery extends PageQuery {
 
 /** `GET /logs/types` 的单项 */
 export interface LogTypeItem {
+  /** Stable backend/database identifier; the UI translates it through i18n. */
   Type: string
-  Label: string
   TargetType: string
 }
 
@@ -1051,7 +990,10 @@ export type SiteConfig = SiteConfigResponse
 // ---------------------------------------------------------------------------
 
 export interface SystemStats {
-  Users: { Total: number; Active: number; Disabled: number; Admins: number }
+  /** `mine`（普通用户）/ `all`（管理员）—— 后端按角色决定统计范围 */
+  Scope?: 'mine' | 'all'
+  /** ⚠️ **仅管理员**返回（普通用户的响应里没有这个字段） */
+  Users?: { Total: number; Active: number; Disabled: number; Admins: number }
   Uploads: {
     Total: number
     TotalSize: number
@@ -1060,8 +1002,10 @@ export interface SystemStats {
     FailedCount: number
   }
   Jobs: { Running: number; Queued: number }
+  /** 最近 30 天，后端已按**本地日**分组并补齐空缺日期 */
   Trend: { Date: string; Count: number; Size: number }[]
-  ByStorage: { StorageUID: string; Name: string; Count: number }[]
+  /** ⚠️ **仅管理员**返回 */
+  ByStorage?: { StorageUID: string; Name: string; Count: number }[]
 }
 
 // ---------------------------------------------------------------------------

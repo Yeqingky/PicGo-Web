@@ -361,7 +361,7 @@ func TestValidatePages(t *testing.T) {
 	valid := [][]string{
 		{"/"},
 		{"/", "/gallery"},
-		{"/", "/upload", "/gallery", "/albums", "/jobs", "/logs", "/settings"},
+		{"/", "/upload", "/gallery", "/jobs", "/logs", "/settings"},
 		{"/"},                  // 精确匹配，不与 /login 冲突
 		{"/*"},                 // 通配：允许（接管所有非保留业务页面）
 		{"/apixyz"},            // 不是 /api 的路径段边界，合法

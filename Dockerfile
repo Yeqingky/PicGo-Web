@@ -1,15 +1,15 @@
-# PicGo-Web 生产镜像
+# PicGo-Web 生产镜像（多阶段构建，本文件位于仓库根目录）
 #
 # ⚠️ 构建上下文必须是**仓库根目录**（PicGo-Web/），因为它需要 web/、picgo-agent/、
-#    server/ 与 deploy/vendor/picgo-*.tgz。
+#    server/ 三端源码。
 #
-# 前置（一次即可）：
-#   make vendor        # 把打过补丁的 PicGo-Core 打成 deploy/vendor/picgo-<ver>.tgz
+# 构建（编译全部发生在 docker build 过程中，最终镜像里只跑编译好的二进制）：
+#   docker build -t picgo-web:latest .
 #
-# 构建：
-#   docker build -f deploy/docker/Dockerfile -t picgo-web:latest .
+# 或直接：make up-build（docker compose up -d --build）
 #
-# 或直接：make docker-build
+# 缓存清理约定：每个构建阶段在产物就绪后、阶段结束前清掉包管理器与编译缓存
+#   （pnpm store / npm cache / corepack / go build cache），保证层内无缓存残留。
 
 # ===========================================================================
 # 阶段 1：构建前端 SPA（内置界面）
@@ -19,12 +19,15 @@ WORKDIR /build/web
 
 RUN corepack enable
 
-# 先只拷清单，利用 layer 缓存
-COPY web/package.json web/pnpm-lock.yaml ./
+# 先只拷清单（含 pnpm 12 供应链策略配置：allowBuilds），利用 layer 缓存
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web/ ./
-RUN pnpm build
+RUN pnpm build \
+    # 打包前清理缓存：pnpm store、npm/corepack 缓存、临时文件
+    && pnpm store prune \
+    && rm -rf /root/.cache /root/.npm /root/.local/share/pnpm/store /tmp/*
 
 
 # ===========================================================================
@@ -38,14 +41,16 @@ RUN corepack enable
 # picgo-core 从 npm 取打过补丁的版本：`@yeqingky/picgo-core`（含按次指定图床等补丁，
 # 见 PicGo-Core 仓库的 FORK-NOTES.md）。因此镜像里**不需要**本地 PicGo-Core 源码，
 # 也不需要预先 `make vendor` 打 tarball。
-COPY picgo-agent/package.json picgo-agent/pnpm-lock.yaml ./
+COPY picgo-agent/package.json picgo-agent/pnpm-lock.yaml picgo-agent/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY picgo-agent/ ./
 RUN pnpm build
 
-# 只保留生产依赖，缩小体积
-RUN pnpm prune --prod
+# 只保留生产依赖，缩小体积；随后清理包管理器缓存（打包前不留缓存残留）
+RUN pnpm prune --prod \
+    && pnpm store prune \
+    && rm -rf /root/.cache /root/.npm /root/.local/share/pnpm/store /tmp/*
 
 # 构建期断言：确认 picgo-core 真的装进来了，且**带我们的补丁**
 # （否则容器起得来但上传会静默用错图床 —— 这类问题在运行时极难排查）
@@ -92,7 +97,11 @@ RUN test -f internal/webfs/dist/index.html \
 RUN test -n "$(find internal/webfs/dist/assets -type f -print -quit 2>/dev/null)" \
     || (echo "错误：webfs/dist/assets 为空" && exit 1)
 
-RUN go build -trimpath -ldflags "-s -w" -o /out/picgo-web ./cmd/picgo-web
+RUN go build -trimpath -ldflags "-s -w" -o /out/picgo-web ./cmd/picgo-web \
+    # 打包前清理编译缓存（build cache 约 GB 级；mod cache 由上面 download 层的
+    # 层缓存负责，这里不动 —— 只改源码重建时依赖下载层仍可命中缓存）
+    && go clean -cache \
+    && rm -rf /root/.cache /tmp/*
 
 
 # ===========================================================================
@@ -100,11 +109,15 @@ RUN go build -trimpath -ldflags "-s -w" -o /out/picgo-web ./cmd/picgo-web
 # ===========================================================================
 FROM alpine:3.21
 
-# 1) node 运行时：picgo-agent 是 Node 侧车，必须存在
-# 2) ca-certificates：调图床 / GitHub OAuth / ACG API 需要
-# 3) tzdata：站点与日志使用 Asia/Shanghai
-# 4) wget（busybox 自带）：healthcheck 用
-RUN apk add --no-cache nodejs ca-certificates tzdata
+# 1) node + npm 运行时：picgo-agent 是 Node 侧车；picgo-core 装卸插件要 spawn npm
+#    （⚠️ alpine 的 nodejs 包不捆绑 npm，必须显式装，否则插件安装报 error code -2）
+# 2) git：主题的 Git 安装 / 默认主题 seed 拉取（D100）
+# 3) curl：部分插件上传器会 shell out 到 curl（如 picgo-plugin-nodeimage）
+# 4) ca-certificates：调图床 / GitHub OAuth / ACG API 需要
+# 5) tzdata：站点与日志使用 Asia/Shanghai
+# 6) wget（busybox 自带）：healthcheck 用
+RUN apk add --no-cache nodejs npm git curl ca-certificates tzdata \
+    && rm -rf /var/cache/apk/* /tmp/*
 
 WORKDIR /app
 

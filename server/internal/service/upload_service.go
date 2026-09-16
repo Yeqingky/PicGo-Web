@@ -53,7 +53,6 @@ type UploadService struct {
 	uploads  *repository.UploadRepo
 	jobs     *repository.JobRepo
 	users    *repository.UserRepo
-	albums   *repository.AlbumRepo
 	storage  *StorageService
 	ag       agent.Client
 	hub      *events.Hub
@@ -126,7 +125,6 @@ func NewUploadService(
 	uploads *repository.UploadRepo,
 	jobs *repository.JobRepo,
 	users *repository.UserRepo,
-	albums *repository.AlbumRepo,
 	storage *StorageService,
 	ag agent.Client,
 	hub *events.Hub,
@@ -145,7 +143,6 @@ func NewUploadService(
 		uploads:     uploads,
 		jobs:        jobs,
 		users:       users,
-		albums:      albums,
 		storage:     storage,
 		ag:          ag,
 		hub:         hub,
@@ -396,7 +393,6 @@ type BatchItem struct {
 type EnqueueBatchInput struct {
 	Files      []IncomingFile
 	StorageUID string
-	AlbumUID   string
 	// KeepLocal 覆盖全局 `upload.keepLocalCopy`。
 	KeepLocal *bool
 	// Source 记录来源（web / api / lsky），默认 web。
@@ -407,7 +403,7 @@ type EnqueueBatchInput struct {
 //
 // 校验顺序（docs/API.md §4.1，任一失败即整体拒绝、**不产生 job**）：
 //
-//  1. 扩展名白名单（blockSvg 时额外拒 svg）
+//  1. 扩展名白名单（blockSvg 默认开启，额外拒 svg）
 //  2. 单文件大小
 //  3. 存储配置存在且启用
 //  4. 配额（非管理员）
@@ -436,7 +432,7 @@ func (s *UploadService) EnqueueBatch(ctx context.Context, user *model.User, in E
 	// ---- 1/2. 文件级校验 ----
 	maxSize := s.settings.GetInt("upload.maxSizeBytes", 20<<20)
 	allowed := s.allowedExtensions()
-	blockSvg := s.settings.GetBool("upload.blockSvg", false)
+	blockSvg := s.settings.GetBool("upload.blockSvg", true)
 
 	var totalSize int64
 	for _, f := range in.Files {
@@ -504,18 +500,8 @@ func (s *UploadService) EnqueueBatch(ctx context.Context, user *model.User, in E
 		keepLocal = *in.KeepLocal
 	}
 
-	albumUID := strings.TrimSpace(in.AlbumUID)
-	if albumUID == "" {
-		albumUID = strings.TrimSpace(s.settings.GetString("upload.defaultAlbumUID"))
-	}
-	// 校验相册归属（不存在/不属于该用户时静默忽略，避免「上传成功但归错相册」）
-	if albumUID != "" && !s.albumBelongsTo(albumUID, user.UID) {
-		albumUID = ""
-	}
-
 	payload := map[string]any{
 		"StorageUID": target.StorageUID,
-		"AlbumUID":   albumUID,
 		"KeepLocal":  keepLocal,
 		"Source":     source,
 	}
@@ -545,7 +531,6 @@ func (s *UploadService) EnqueueBatch(ctx context.Context, user *model.User, in E
 			UID:          uploadUID,
 			UserUID:      user.UID,
 			StorageUID:   target.StorageUID,
-			AlbumUID:     albumUID,
 			FileName:     filepath.Base(f.OriginalName),
 			OriginalName: f.OriginalName,
 			Size:         f.Size,
@@ -782,15 +767,6 @@ func (s *UploadService) allowedExtensions() map[string]bool {
 	return out
 }
 
-// albumBelongsTo 判断相册是否属于该用户（不存在或不属于则返回 false）。
-func (s *UploadService) albumBelongsTo(albumUID, userUID string) bool {
-	a, err := s.albums.FindByUID(albumUID)
-	if err != nil {
-		return false
-	}
-	return a.UserUID == userUID
-}
-
 // ---------------------------------------------------------------------------
 // worker：处理单项
 // ---------------------------------------------------------------------------
@@ -920,12 +896,12 @@ func (s *UploadService) finishItemSucceeded(ctx context.Context, item *queuedUpl
 		s.log.Error("写入上传结果失败", "upload_uid", item.UploadUID, "err", err)
 	}
 
-	// 相册冗余计数
-	if up, err := s.uploads.FindByUID(item.UploadUID); err == nil && up.AlbumUID != "" {
-		if err := s.albums.RecountImages(up.AlbumUID); err != nil {
-			s.log.Warn("更新相册计数失败", "album_uid", up.AlbumUID, "err", err)
-		}
-	}
+	// 运行时探测「服务端改名」（PicList 同款处理）：URL 文件名 ≠ 期望名
+	// ⇒ 该图床无视用户的魔法文件名（如 NodeImage 强制短链 ID）。
+	// 写进存储配置的 Capabilities JSON（D77 运行时探测原则），
+	// UI 据此在「魔法文件名」旁提示，避免用户以为模板没生效。
+	// 尽力而为：失败只记 debug，不影响上传结果。
+	s.storage.MarkServerRenameDetected(item.Target.StorageUID, fields["FileName"].(string), res.URL)
 
 	_ = s.jobs.UpdateItem(item.JobUID, item.Seq, map[string]any{
 		"Status": model.JobStatusSucceeded, "Attempts": attempts,

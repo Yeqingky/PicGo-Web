@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,7 +366,6 @@ func TestDecide(t *testing.T) {
 
 		// 未注册的业务页面 → 内置 SPA
 		{"/upload", TargetSPA},
-		{"/albums", TargetSPA},
 		{"/jobs", TargetSPA},
 		{"/logs", TargetSPA},
 		{"/settings", TargetSPA},
@@ -559,6 +559,24 @@ func TestScreenshot(t *testing.T) {
 	env.writeTheme("nopic", `"Pages":["/"]`, themeIndexMarker)
 	if _, _, err := env.Svc.Screenshot("nopic"); err == nil {
 		t.Error("没有预览图时应返回错误")
+	}
+}
+
+func TestScreenshotDefaultDiskFallsBackToEmbedded(t *testing.T) {
+	env := newTestEnv(t)
+	// 模拟升级后已经存在、但没有新预览图的 default 主题目录。
+	env.writeTheme(embeddedDefaultID, `"Pages":["/"]`, themeIndexMarker)
+
+	data, ctype, err := env.Svc.Screenshot(embeddedDefaultID)
+	if err != nil {
+		t.Fatalf("default 主题应回退到内嵌预览图: %v", err)
+	}
+	want, err := embeddedFile(ScreenshotFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, want) || ctype != "image/png" {
+		t.Errorf("回退预览图不符: bytes=%d/%d content-type=%q", len(data), len(want), ctype)
 	}
 }
 

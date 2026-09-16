@@ -8,7 +8,6 @@
 //
 //	up_    Uploads
 //	st_    StorageConfigs
-//	al_    Albums
 //	job_   Jobs
 //	usr_   Users
 //	tok_   APITokens
@@ -31,7 +30,6 @@ import (
 const (
 	PrefixUpload       = "up_"
 	PrefixStorage      = "st_"
-	PrefixAlbum        = "al_"
 	PrefixJob          = "job_"
 	PrefixUser         = "usr_"
 	PrefixAPIToken     = "apt_"
@@ -66,9 +64,6 @@ func Upload() string { return WithPrefix(PrefixUpload) }
 
 // Storage 生成存储配置 UID。
 func Storage() string { return WithPrefix(PrefixStorage) }
-
-// Album 生成相册 UID。
-func Album() string { return WithPrefix(PrefixAlbum) }
 
 // Job 生成任务 UID。
 func Job() string { return WithPrefix(PrefixJob) }

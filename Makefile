@@ -16,8 +16,17 @@ DEV_FILE  := docker-compose-dev.yml
 PROD_FILE := docker-compose.yml
 PG_FILE   := docker-compose.pgsql.yml
 
-# 开发环境用独立的数据目录，与生产的 ./data 隔离
+# 开发环境用独立的数据目录，与生产的 ./data 隔离；
+# 全部用宿主目录挂载（bind mount），不用存储卷
 DATA_DEV  := $(ROOT)/data-dev
+DEV_DIRS  := $(DATA_DEV)/picgo \
+             $(DATA_DEV)/picgo-agent/node_modules \
+             $(DATA_DEV)/web/node_modules \
+             $(DATA_DEV)/go/mod \
+             $(DATA_DEV)/go/build-cache \
+             $(DATA_DEV)/corepack \
+             $(DATA_DEV)/e2e/picgo-agent/node_modules \
+             $(DATA_DEV)/e2e/web/node_modules
 
 .PHONY: help
 help: ## 显示本帮助
@@ -31,20 +40,19 @@ help: ## 显示本帮助
 
 .PHONY: dev
 dev: ## 起开发环境（三容器 + 热重载；前台，Ctrl-C 停止）
-	@mkdir -p $(DATA_DEV)/picgo
+	@mkdir -p $(DEV_DIRS)
 	@echo "→ 启动开发环境（前端 :5173 / 后端 :8080 / 侧车 :36678）"
-	@echo "  首次启动会自动构建镜像，约 1~2 分钟"
+	@echo "  直接用基础镜像跑源码：首次启动会自动安装依赖，缓存走 ./data-dev/ 挂载目录"
 	@echo "  管理员初始密码：docker compose -f $(DEV_FILE) logs server | grep password"
 	@$(COMPOSE) -f $(DEV_FILE) up
 
 .PHONY: dev-build
-dev-build: ## 重建开发镜像（改了依赖后需要）
-	@mkdir -p $(DATA_DEV)/picgo
-	@$(COMPOSE) -f $(DEV_FILE) build
+dev-build: ## 【已废弃】dev 不再构建镜像（基础镜像 + 启动时自动装依赖）
+	@echo "✓ dev 环境不构建镜像：改依赖后直接 make dev-up 重启，容器启动时会自动 pnpm install"
 
 .PHONY: dev-up
 dev-up: ## 起开发环境（后台）
-	@mkdir -p $(DATA_DEV)/picgo
+	@mkdir -p $(DEV_DIRS)
 	@$(COMPOSE) -f $(DEV_FILE) up -d
 	@echo "✓ 前端 http://localhost:5173  后端 http://localhost:8080"
 
@@ -53,10 +61,10 @@ dev-down: ## 停开发环境（保留数据）
 	@$(COMPOSE) -f $(DEV_FILE) down
 
 .PHONY: dev-reset
-dev-reset: ## 停开发环境并**删除数据**（data-dev 与容器卷；不可恢复）
-	@echo "⚠️  将删除 $(DATA_DEV) 与 compose 卷（数据库/主题/插件全部丢失）"
+dev-reset: ## 停开发环境并**删除数据**（data-dev 挂载目录；不可恢复）
+	@echo "⚠️  将删除 $(DATA_DEV)（数据库/依赖/缓存/主题全部丢失）"
 	@read -p "确认？输入 yes 继续：" ans; [ "$$ans" = "yes" ] || { echo "已取消"; exit 1; }
-	@$(COMPOSE) -f $(DEV_FILE) down -v
+	@$(COMPOSE) -f $(DEV_FILE) down
 	@rm -rf $(DATA_DEV)
 	@echo "✓ 已重置"
 
@@ -115,23 +123,27 @@ logs: ## 跟踪生产日志
 .PHONY: check
 check: check-server check-agent check-web ## 三端全部检查
 
+.PHONY: theme-sync
+theme-sync: ## 从 PicGo-Web-Theme 仓库同步默认主题到内嵌兕底副本
+	@bash scripts/sync-default-theme.sh
+
 .PHONY: check-server
 check-server: ## Go：vet + test + 静态编译
 	@echo "=== server ==="
 	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps server sh -c \
-		'go vet ./... && go test ./... && CGO_ENABLED=0 go build -o /dev/null ./cmd/picgo-web'
+		'apk add --no-cache git >/dev/null 2>&1; go vet ./... && go test ./... && CGO_ENABLED=0 go build -o /dev/null ./cmd/picgo-web'
 
 .PHONY: check-agent
-check-agent: ## 侧车：lint + typecheck + test
+check-agent: ## 侧车：install + lint + typecheck + test
 	@echo "=== picgo-agent ==="
 	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps agent sh -c \
-		'pnpm lint && pnpm typecheck && pnpm test'
+		'corepack enable && pnpm install --frozen-lockfile=false && pnpm lint && pnpm typecheck && pnpm test'
 
 .PHONY: check-web
-check-web: ## 前端：lint + typecheck + build
+check-web: ## 前端：install + lint + typecheck + build
 	@echo "=== web ==="
 	@$(COMPOSE) -f $(DEV_FILE) run --rm --no-deps web sh -c \
-		'pnpm lint && pnpm typecheck && pnpm build'
+		'corepack enable && pnpm install --frozen-lockfile=false && pnpm lint && pnpm typecheck && pnpm build'
 
 # ===========================================================================
 # 端到端验证（在 server 容器内跑，用临时数据目录，不污染 data-dev）

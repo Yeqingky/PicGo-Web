@@ -1,17 +1,11 @@
 import { del, get, patch, post } from '@/lib/http'
 import type {
-  Album,
-  AlbumListQuery,
   BatchDeleteUploadsRequest,
   BatchDeleteUploadsResponse,
-  CreateAlbumRequest,
   CreateUploadsResponse,
-  DeleteAlbumResponse,
   DeleteUploadResponse,
   LinkFormatName,
-  MoveUploadsResponse,
   PageData,
-  UpdateAlbumRequest,
   UpdateUploadRequest,
   Upload,
   UploadLinkResponse,
@@ -22,7 +16,7 @@ import type {
 } from '@/types/api'
 
 /**
- * 图库与相册（API.md §4 / §5）。
+ * 图库（API.md §4）。
  *
  * 三条必须记住的规则：
  *  - **一次上传请求 = 1 个 job = 1 个驱动**（D38）→ 上传接口是 `multipart/form-data`
@@ -34,7 +28,6 @@ import type {
 export interface UploadFilesInput {
   Files: File[]
   StorageUID: string
-  AlbumUID?: string
   KeepLocal?: boolean
 }
 
@@ -54,7 +47,6 @@ export const uploadApi = {
       form.append('Files', file)
     }
     form.append('StorageUID', input.StorageUID)
-    if (input.AlbumUID) form.append('AlbumUID', input.AlbumUID)
     if (input.KeepLocal !== undefined) form.append('KeepLocal', String(input.KeepLocal))
 
     return post<CreateUploadsResponse>('/uploads', form, {
@@ -74,7 +66,6 @@ export const uploadApi = {
   createFromUrl(payload: {
     URLs: string[]
     StorageUID: string
-    AlbumUID?: string
   }): Promise<CreateUploadsResponse> {
     return post<CreateUploadsResponse>('/uploads/from-url', payload)
   },
@@ -87,7 +78,7 @@ export const uploadApi = {
     return get<Upload>(`/uploads/${encodeURIComponent(uid)}`)
   },
 
-  /** 重命名（`AliasName`，**不改远端文件名**）/ 移动相册。 */
+  /** 重命名（`AliasName`，**不改远端文件名**）。 */
   update(uid: string, payload: UpdateUploadRequest): Promise<Upload> {
     return patch<Upload>(`/uploads/${encodeURIComponent(uid)}`, payload)
   },
@@ -121,52 +112,5 @@ export const uploadApi = {
   /** 批量外链（多行拼接，供一次性复制，D68）。 */
   links(payload: UploadLinksRequest): Promise<UploadLinksResponse> {
     return post<UploadLinksResponse>('/uploads/links', payload)
-  },
-}
-
-export const albumApi = {
-  list(query: AlbumListQuery = {}): Promise<{ Items: Album[] }> {
-    return get<{ Items: Album[] }>('/albums', { params: query })
-  },
-
-  get(uid: string): Promise<Album> {
-    return get<Album>(`/albums/${encodeURIComponent(uid)}`)
-  },
-
-  create(payload: CreateAlbumRequest): Promise<Album> {
-    return post<Album>('/albums', payload)
-  },
-
-  update(uid: string, payload: UpdateAlbumRequest): Promise<Album> {
-    return patch<Album>(`/albums/${encodeURIComponent(uid)}`, payload)
-  },
-
-  /**
-   * 删除相册。
-   *
-   * `withUploads=false` 且相册内有图片 → 后端返 `40901`（提示先移出）；
-   * `withUploads=true` 时相册内图片**仅脱离相册**，**不删除图片**。
-   */
-  remove(uid: string, withUploads = false): Promise<DeleteAlbumResponse> {
-    return del<DeleteAlbumResponse>(`/albums/${encodeURIComponent(uid)}`, {
-      params: { WithUploads: withUploads },
-    })
-  },
-
-  /** 把图片移入该相册。 */
-  moveUploads(uid: string, uploadUIDs: string[]): Promise<MoveUploadsResponse> {
-    return post<MoveUploadsResponse>(`/albums/${encodeURIComponent(uid)}/move-uploads`, {
-      UploadUIDs: uploadUIDs,
-    })
-  },
-
-  /**
-   * 按请求体指定目标相册（`targetAlbumUID` 传 `""` 表示**移出相册**）。
-   */
-  moveUploadsTo(targetAlbumUID: string, uploadUIDs: string[]): Promise<MoveUploadsResponse> {
-    return post<MoveUploadsResponse>('/albums/move-uploads', {
-      UploadUIDs: uploadUIDs,
-      TargetAlbumUID: targetAlbumUID,
-    })
   },
 }

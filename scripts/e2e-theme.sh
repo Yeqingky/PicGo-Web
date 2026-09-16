@@ -334,6 +334,25 @@ RESIDUE="$(ls -a data/themes 2>/dev/null | grep -c '^\.tmp-' || true)"
 expect_eq "无 .tmp-* 临时目录残留" "$RESIDUE" "0"
 
 # ---------------------------------------------------------------------------
+step "Git 安装（D100，同一端点按 Content-Type 分发）"
+
+GIT_INSTALL="$(curl -s "${AUTH[@]}" -H 'content-type: application/json' \
+  -X POST "$API/themes/install" \
+  -d '{"URL":"https://github.com/Yeqingky/PicGo-Web-Theme.git","Overwrite":true}')"
+expect_contains "从官方主题仓库 Git 安装成功" "$GIT_INSTALL" '"Installed":true'
+expect_contains "Git 安装返回 Branch" "$GIT_INSTALL" '"Branch":"main"'
+[[ -f data/themes/default/index.html ]] && ok "default 主题内容已更新（Overwrite）" || bad "default 目录损坏"
+[[ ! -d data/themes/default/.git ]] && ok "主题目录不含 .git" || bad ".git 被复制进主题目录"
+
+GIT_BAD="$(curl -s "${AUTH[@]}" -H 'content-type: application/json' \
+  -X POST "$API/themes/install" -d '{"URL":"http://github.com/x/y.git"}')"
+expect_contains "非 https Git 地址被拒（40001）" "$GIT_BAD" '"Code":40001'
+
+GIT_MISSING="$(curl -s "${AUTH[@]}" -H 'content-type: application/json' \
+  -X POST "$API/themes/install" -d '{"URL":"https://github.com/Yeqingky/no-such-repo-404-xyz.git"}')"
+expect_contains "不存在的仓库被拒（40001）" "$GIT_MISSING" '"Code":40001'
+
+# ---------------------------------------------------------------------------
 step "卸载规则"
 expect_eq "不能卸载 default（40901）" \
   "$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X DELETE "$API/themes/default")" "409"

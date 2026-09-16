@@ -1,12 +1,12 @@
-import { ArrowLeft, ExternalLink, FolderInput, Pencil, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ArrowLeft, ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 
 import { ConfirmDialog } from '@/components/common/confirm-dialog'
 import { LinkCopyMenu } from '@/components/common/link-copy-menu'
 import { PageHeader } from '@/components/common/page-header'
 import { StatusBadge } from '@/components/common/status-badge'
-import { MoveUploadsDialog, RenameUploadDialog } from '@/components/gallery/upload-dialogs'
+import { RenameUploadDialog } from '@/components/gallery/upload-dialogs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -15,17 +15,16 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toast'
-import { useAlbums, useUploadDetail } from '@/hooks/api'
+import { useUploadDetail } from '@/hooks/api'
 import { t } from '@/i18n'
 import { uploadApi } from '@/lib/api'
-import { albumNameMap } from '@/lib/album'
 import { formatBytes, formatDateTime, formatDimensions } from '@/lib/format'
 import { toApiError } from '@/types/api'
 
 /**
  * 图片详情（DESIGN.md §3.2 `/gallery/:UID`）。
  *
- * 内容：大图 + 元数据（文件名/尺寸/大小/存储/相册/时间）+ 外链复制 + 重命名/移动/删除。
+ * 内容：大图 + 元数据（文件名/尺寸/大小/存储/时间）+ 外链复制 + 重命名/删除。
  *
  * 注意 `AliasName` 与 `FileName` 的区别：前者是**站内展示名**，
  * 后者是**图床上的真实文件名**（含魔法文件名结果）。重命名只改前者（D42/D66 边界）。
@@ -35,14 +34,10 @@ export function GalleryDetailPage() {
   const navigate = useNavigate()
 
   const { upload, loading, error, refresh } = useUploadDetail(uid)
-  const { albums } = useAlbums()
 
   const [renaming, setRenaming] = useState(false)
-  const [moving, setMoving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteRemote, setDeleteRemote] = useState(false)
-
-  const albumNames = useMemo(() => albumNameMap(albums), [albums])
 
   const confirmDelete = async () => {
     await uploadApi.remove(uid, deleteRemote)
@@ -99,10 +94,6 @@ export function GalleryDetailPage() {
               <Pencil aria-hidden />
               {t('GALLERY_RENAME_TITLE')}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setMoving(true)}>
-              <FolderInput aria-hidden />
-              {t('GALLERY_MOVE_TO_ALBUM')}
-            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -152,9 +143,6 @@ export function GalleryDetailPage() {
             <MetaRow label={t('GALLERY_COL_STORAGE')}>
               {upload.StorageName || upload.StorageUID || '—'}
             </MetaRow>
-            <MetaRow label={t('GALLERY_COL_ALBUM')}>
-              {upload.AlbumUID ? (albumNames[upload.AlbumUID] ?? '—') : t('GALLERY_NO_ALBUM')}
-            </MetaRow>
             <MetaRow label={t('GALLERY_DETAIL_SOURCE')}>{upload.Source}</MetaRow>
             <MetaRow label={t('GALLERY_COL_CREATED')}>{formatDateTime(upload.CreatedAt)}</MetaRow>
             {upload.Error ? (
@@ -187,14 +175,6 @@ export function GalleryDetailPage() {
         onOpenChange={setRenaming}
         upload={upload}
         onRenamed={refresh}
-      />
-
-      <MoveUploadsDialog
-        open={moving}
-        onOpenChange={setMoving}
-        uploads={[upload]}
-        albums={albums}
-        onMoved={refresh}
       />
 
       <ConfirmDialog

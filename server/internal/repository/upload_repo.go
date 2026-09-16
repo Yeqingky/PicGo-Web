@@ -30,9 +30,7 @@ type UploadListFilter struct {
 
 	Keyword    string
 	StorageUID string
-	// AlbumUID 为空表示不按相册过滤；`none` 表示「未归入任何相册」。
-	AlbumUID string
-	Status   string
+	Status     string
 
 	Sort     string // CreatedAt | Size | FileName
 	Order    string // asc | desc
@@ -58,13 +56,6 @@ func (r *UploadRepo) List(f UploadListFilter) ([]model.Upload, int64, error) {
 	}
 	if s := strings.TrimSpace(f.StorageUID); s != "" {
 		q = q.Where(map[string]any{"StorageUID": s})
-	}
-	if a := strings.TrimSpace(f.AlbumUID); a != "" {
-		if strings.EqualFold(a, "none") {
-			q = q.Where(`(` + col("AlbumUID") + ` IS NULL OR ` + col("AlbumUID") + ` = '')`)
-		} else {
-			q = q.Where(map[string]any{"AlbumUID": a})
-		}
 	}
 	if st := strings.TrimSpace(f.Status); st != "" {
 		q = q.Where(map[string]any{"Status": st})

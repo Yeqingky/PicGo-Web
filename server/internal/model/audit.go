@@ -40,39 +40,39 @@ const (
 )
 
 // LogTypeItem 是可过滤的类型清单（供后台 GET /logs/types）。
+// Type 是数据库与 API 共用的稳定标识；本层不携带任何语言相关的展示文案。
 type LogTypeItem struct {
-	Type        string `json:"Type"`
-	Description string `json:"Description"`
+	Type string `json:"Type"`
 }
 
 // LogTypes 返回全部可过滤的日志类型（顺序即后台展示顺序）。
 func LogTypes() []LogTypeItem {
 	return []LogTypeItem{
-		{Type: LogTypeUpload, Description: "上传"},
-		{Type: LogTypeImageDelete, Description: "删除图片"},
-		{Type: LogTypeImageUpdate, Description: "修改图片"},
-		{Type: LogTypeMailSend, Description: "邮件发送"},
-		{Type: LogTypeUserCreate, Description: "账号创建"},
-		{Type: LogTypeUserDelete, Description: "账号注销"},
-		{Type: LogTypeUserUpdate, Description: "账号修改"},
-		{Type: LogTypeStorageCreate, Description: "新建存储配置"},
-		{Type: LogTypeStorageUpdate, Description: "修改存储配置"},
-		{Type: LogTypeStorageDelete, Description: "删除存储配置"},
-		{Type: LogTypePluginInstall, Description: "安装插件"},
-		{Type: LogTypePluginUninstall, Description: "卸载插件"},
-		{Type: LogTypePluginUpdate, Description: "更新插件"},
-		{Type: LogTypeAuthLogin, Description: "登录成功"},
-		{Type: LogTypeAuthFailed, Description: "登录失败"},
-		{Type: LogTypeAuthLogout, Description: "登出"},
-		{Type: LogTypeSettingUpdate, Description: "修改系统设置"},
-		{Type: LogTypeLogCleanup, Description: "日志清理"},
-		{Type: LogTypeThemeInstall, Description: "安装主题"},
-		{Type: LogTypeThemeUninstall, Description: "卸载主题"},
-		{Type: LogTypeThemeActivate, Description: "启用主题"},
-		{Type: LogTypeThemeRescan, Description: "重新扫描主题"},
-		{Type: LogTypeThemeSettingsUpdate, Description: "修改主题设置"},
-		{Type: LogTypeThemeSettingsClear, Description: "清理主题设置"},
-		{Type: LogTypeThemeError, Description: "主题错误"},
+		{Type: LogTypeUpload},
+		{Type: LogTypeImageDelete},
+		{Type: LogTypeImageUpdate},
+		{Type: LogTypeMailSend},
+		{Type: LogTypeUserCreate},
+		{Type: LogTypeUserDelete},
+		{Type: LogTypeUserUpdate},
+		{Type: LogTypeStorageCreate},
+		{Type: LogTypeStorageUpdate},
+		{Type: LogTypeStorageDelete},
+		{Type: LogTypePluginInstall},
+		{Type: LogTypePluginUninstall},
+		{Type: LogTypePluginUpdate},
+		{Type: LogTypeAuthLogin},
+		{Type: LogTypeAuthFailed},
+		{Type: LogTypeAuthLogout},
+		{Type: LogTypeSettingUpdate},
+		{Type: LogTypeLogCleanup},
+		{Type: LogTypeThemeInstall},
+		{Type: LogTypeThemeUninstall},
+		{Type: LogTypeThemeActivate},
+		{Type: LogTypeThemeRescan},
+		{Type: LogTypeThemeSettingsUpdate},
+		{Type: LogTypeThemeSettingsClear},
+		{Type: LogTypeThemeError},
 	}
 }
 

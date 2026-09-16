@@ -12,6 +12,7 @@
  */
 
 import { serve } from '@hono/node-server'
+import { spawn } from 'node:child_process'
 import { loadEnv } from './env.js'
 import { createLogger } from './logger.js'
 import { createContext } from './context.js'
@@ -102,6 +103,21 @@ async function main(): Promise<void> {
           contextData: patches.ContextData,
           reason: patches.Error ?? '(未提供原因)'
         })
+      }
+
+      // 环境自检：picgo-core 装卸插件靠 spawn npm（cross-spawn ENOENT 时
+      // 只报一个含混的「error code is -2」，难以排查 —— 启动时提前告知）。
+      // ⚠️ alpine 的 `apk add nodejs` 不捆绑 npm，生产镜像必须显式 `apk add npm`。
+      try {
+        const npmCheck = spawn('npm', ['--version'], { stdio: 'ignore' })
+        npmCheck.once('error', () => {
+          log.warn('环境缺少 npm —— 插件安装/卸载/更新将全部失败（error code -2）。请在镜像内安装 npm（如 apk add npm）')
+        })
+        npmCheck.once('close', (code) => {
+          if (code === 0) log.debug('npm 自检通过')
+        })
+      } catch {
+        log.warn('环境缺少 npm —— 插件安装/卸载/更新将全部失败（error code -2）')
       }
     }
   )

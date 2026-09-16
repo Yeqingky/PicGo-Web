@@ -54,6 +54,7 @@ func (s *Service) RegisterAdminRoutes(api *gin.RouterGroup, opts AdminRoutesOpti
 	group.GET("", h.list)
 	group.POST("/rescan", h.rescan)
 	group.POST("/install", h.install)
+	group.POST("/install-git", h.installFromGit)
 	group.PUT("/active", h.setActive)
 	group.DELETE("/:themeID", h.uninstall)
 	group.GET("/:themeID/settings", h.getSettings)
@@ -286,8 +287,24 @@ func (h *themeHandler) rescan(c *gin.Context) {
 	response.OK(c, h.svc.Rescan(c.Request.Context(), langOf(c), currentUserUID(c)))
 }
 
-// install 从 zip 安装主题（multipart）。
+// install 安装主题的**统一入口**（D96 zip / D100 Git）。
+//
+// 按 Content-Type 分发：
+//   - `application/json`（{"URL", "Overwrite"}）→ Git 安装（installFromGit）
+//   - 其余（multipart，带 File 字段）→ zip 安装（installZip）
+//
+// 不拆两个端点的理由：资源相同（「装一个主题」），差异只在来源载体，
+// 客户端按自己手头的东西选编码即可。
 func (h *themeHandler) install(c *gin.Context) {
+	if strings.HasPrefix(c.ContentType(), "application/json") {
+		h.installFromGit(c)
+		return
+	}
+	h.installZip(c)
+}
+
+// installZip 处理 multipart zip 安装（D96）。
+func (h *themeHandler) installZip(c *gin.Context) {
 	fileHeader, err := c.FormFile("File")
 	if err != nil {
 		response.InvalidParam(c, "缺少 File 字段（multipart 的 zip 包）")
@@ -323,6 +340,39 @@ func (h *themeHandler) install(c *gin.Context) {
 		"Name":      res.Name,
 		"Version":   res.Version,
 		"Installed": true,
+	})
+}
+
+// installFromGit 从 https Git 仓库安装主题（D100）。
+func (h *themeHandler) installFromGit(c *gin.Context) {
+	var req struct {
+		URL       string `json:"URL"`
+		Overwrite bool   `json:"Overwrite"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.InvalidParam(c, "请求体需为 {\"URL\": \"...\", \"Overwrite\": bool}")
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		response.InvalidParam(c, "缺少 URL")
+		return
+	}
+
+	// 审计在 theme.Service.InstallFromGit 内统一写入（成功与失败都写）
+	res, err := h.svc.InstallFromGit(c.Request.Context(), GitInstallRequest{
+		URL: req.URL, Overwrite: req.Overwrite,
+	})
+	if err != nil {
+		failTheme(c, err)
+		return
+	}
+
+	response.OK(c, gin.H{
+		"ID":        res.ID,
+		"Name":       res.Name,
+		"Version":    res.Version,
+		"Branch":     res.Branch,
+		"Installed":  true,
 	})
 }
 
@@ -477,7 +527,9 @@ func failTheme(c *gin.Context, err error) {
 		errors.Is(err, ErrSingleFileTooLarge),
 		errors.Is(err, ErrTooManyFiles),
 		errors.Is(err, ErrSettingUnknown),
-		errors.Is(err, ErrSettingType):
+		errors.Is(err, ErrSettingType),
+		errors.Is(err, ErrGitInvalid),
+		errors.Is(err, ErrGitClone):
 		response.FailMsg(c, response.CodeInvalidParam, err.Error())
 
 	default:

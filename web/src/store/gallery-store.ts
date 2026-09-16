@@ -20,8 +20,6 @@ export interface GalleryFilter {
   Keyword: string
   /** `''` = 全部存储 */
   StorageUID: string
-  /** `''` = 全部相册；`'none'` = 未归入任何相册 */
-  AlbumUID: string
   Status: GalleryStatusFilter
   Sort: 'CreatedAt' | 'Size' | 'FileName'
   Order: 'asc' | 'desc'
@@ -31,7 +29,6 @@ export interface GalleryFilter {
 export const EMPTY_GALLERY_FILTER: GalleryFilter = {
   Keyword: '',
   StorageUID: '',
-  AlbumUID: '',
   Status: '',
   Sort: 'CreatedAt',
   Order: 'desc',

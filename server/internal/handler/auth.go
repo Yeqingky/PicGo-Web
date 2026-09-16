@@ -185,7 +185,6 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"CapacityBytes":      view.CapacityBytes,
 		"UsedBytes":          view.UsedBytes,
 		"ImageCount":         view.ImageCount,
-		"AlbumCount":         view.AlbumCount,
 		"HasPassword":        view.HasPassword,
 		"Identities":         identities,
 		"LastLoginAt":        view.LastLoginAt,

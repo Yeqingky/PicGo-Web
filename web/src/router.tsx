@@ -9,16 +9,14 @@ import { AdminSitePage } from '@/features/admin/site/admin-site-page'
 import { AdminStoragePage } from '@/features/admin/storage/admin-storage-page'
 import { AdminThemesPage } from '@/features/admin/themes/admin-themes-page'
 import { AdminUsersPage } from '@/features/admin/users/admin-users-page'
-import { AlbumsPage } from '@/features/albums/albums-page'
 import { FirstLoginPage } from '@/features/auth/first-login-page'
 import { ForgotPasswordPage } from '@/features/auth/forgot-password-page'
 import { LoginPage } from '@/features/auth/login-page'
 import { ResetPasswordPage } from '@/features/auth/reset-password-page'
 import { GalleryDetailPage } from '@/features/gallery/gallery-detail-page'
 import { GalleryPage } from '@/features/gallery/gallery-page'
-import { HomePage } from '@/features/home/home-page'
 import { JobsPage } from '@/features/jobs/jobs-page'
-import { LogsPage } from '@/features/logs/logs-page'
+import { OverviewPage } from '@/features/overview/overview-page'
 import { SettingsPage } from '@/features/settings/settings-page'
 import { UploadPage } from '@/features/upload/upload-page'
 
@@ -33,10 +31,11 @@ import { UploadPage } from '@/features/upload/upload-page'
  * 守卫语义（DESIGN.md §3 / §8）：
  *  - `RequireAuth`：未登录 → `/login?redirect=<原地址>`；`MustChangePassword` → `/first-login`
  *  - `RequireAdmin`：非 admin → 渲染 403（**不跳转**，避免用户困惑）
- *  - `RequireAnonymous`：已登录访问登录页 → 送回 `/`
+ *  - `RequireAnonymous`：已登录访问登录页 → 送回 `/overview`
  *
- * ⚠️ 生产环境中 `/` 由**当前主题**渲染（D94），下面的 `/` 路由只在
- *    Vite dev server 下可达 —— 见 `features/home/home-page.tsx` 的说明。
+ * ⚠️ 生产环境中 `/` 由**当前主题**渲染（D94），内置 SPA **不占用** `/`：
+ *    概览页固定使用 `/overview`，SPA 内的 `/` 只做重定向
+ *    —— 见 `features/overview/overview-page.tsx` 的说明。
  */
 export const router = createBrowserRouter([
   // ---- 公开（未登录可访问）----
@@ -59,13 +58,13 @@ export const router = createBrowserRouter([
       {
         element: <AppShell />,
         children: [
-          { index: true, element: <HomePage /> },
+          // `/` 在生产环境属于主题（D94），SPA 内只把它转给概览页
+          { index: true, element: <Navigate to="/overview" replace /> },
+          { path: 'overview', element: <OverviewPage /> },
           { path: 'upload', element: <UploadPage /> },
           { path: 'gallery', element: <GalleryPage /> },
           { path: 'gallery/:uid', element: <GalleryDetailPage /> },
-          { path: 'albums', element: <AlbumsPage /> },
           { path: 'jobs', element: <JobsPage /> },
-          { path: 'logs', element: <LogsPage /> },
           { path: 'settings', element: <SettingsPage /> },
 
           // ---- 需管理员 ----

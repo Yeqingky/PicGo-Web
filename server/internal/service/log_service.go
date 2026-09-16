@@ -108,11 +108,10 @@ func (s *LogService) Get(uid string) (*OperationLogView, error) {
 
 // LogTypeView 是「可过滤的类型清单」的一项。
 //
-// `Label` 取 `model.LogTypes()` 的中文描述；`TargetType` 是这类操作通常作用的对象类型，
-// 便于前端在筛选后自动联动第二个筛选器。
+// Type 是数据库与 API 共用的稳定标识；TargetType 是这类操作通常作用的对象类型。
+// 展示文案由前端按当前语言通过 i18n 映射。
 type LogTypeView struct {
 	Type       string `json:"Type"`
-	Label      string `json:"Label"`
 	TargetType string `json:"TargetType"`
 }
 
@@ -126,7 +125,6 @@ func (s *LogService) Types() []LogTypeView {
 	for _, it := range items {
 		out = append(out, LogTypeView{
 			Type:       it.Type,
-			Label:      it.Description,
 			TargetType: defaultTargetTypeOf(it.Type),
 		})
 	}

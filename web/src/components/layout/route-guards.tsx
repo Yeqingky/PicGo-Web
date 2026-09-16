@@ -61,7 +61,7 @@ export function RequireAdmin() {
 /**
  * 禁止已登录用户访问的页面（`/login` 等）。
  *
- * 已登录访问登录页 → 直接送回目标页（或 `/`）。
+ * 已登录访问登录页 → 直接送回控制台（`/overview`）。
  * 注意：`MustChangePassword` 时先送 `/first-login`。
  */
 export function RequireAnonymous() {
@@ -70,7 +70,8 @@ export function RequireAnonymous() {
 
   if (status === 'unknown') return <AuthLoading />
   if (status === 'authenticated') {
-    return <Navigate to={mustChangePassword ? '/first-login' : '/'} replace />
+    // ⚠️ 用 `/overview` 而不是 `/`：`/` 在生产环境由主题渲染（D94）
+    return <Navigate to={mustChangePassword ? '/first-login' : '/overview'} replace />
   }
 
   return <Outlet />

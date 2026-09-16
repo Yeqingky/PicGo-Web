@@ -18,7 +18,9 @@ export function Toaster() {
     <SonnerToaster
       // sonner 的 theme 只接受这三个字面量，与我们的 ThemeMode 同名，可直接传
       theme={theme}
-      position="top-center"
+      position="bottom-right"
+      // 最多同时显示 3 条，超出的叠放在第 3 条位置（sonner 默认层级叠放）
+      visibleToasts={3}
       closeButton
       richColors={false}
       toastOptions={{

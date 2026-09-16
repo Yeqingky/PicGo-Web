@@ -78,10 +78,13 @@ export function LoginPage() {
     [providers.data],
   )
 
-  /** 登录成功后的跳转目标（只接受站内相对路径，防开放重定向）。 */
+  /** 登录成功后的跳转目标（只接受站内相对路径，防开放重定向）。
+   *
+   * 默认回控制台概览页 `/overview` —— **不能用 `/`**：生产环境 `/` 由主题渲染（D94）。
+   */
   const redirectTo = useMemo(() => {
     const raw = searchParams.get('redirect')
-    if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/'
+    if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/overview'
     return raw
   }, [searchParams])
 

@@ -37,7 +37,6 @@ type Deps struct {
 	Tokens   *service.TokenService
 	Uploads  *service.UploadService
 	Gallery  *service.GalleryService
-	Albums   *service.AlbumService
 	Storage  *service.StorageService
 
 	Users *repository.UserRepo
@@ -240,12 +239,7 @@ func (h *Handler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	var albumNum int64
-	if counts, err := h.deps.Users.CountAlbumsByUser([]string{viewer.UID}); err == nil {
-		albumNum = counts[viewer.UID]
-	}
-
-	OK(c, toProfileData(viewer, nickname, imageNum, albumNum))
+	OK(c, toProfileData(viewer, nickname, imageNum))
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +296,6 @@ func (h *Handler) ListImages(c *gin.Context) {
 	sortField, direction := parseLskyOrder(c.Query("order"))
 
 	views, total, err := h.deps.Gallery.List(service.GalleryListInput{
-		AlbumUID: strings.TrimSpace(c.Query("album_id")),
 		// ⚠️ Lsky 契约没有「看全部」的能力，**一律只返回本人图片**
 		Scope:    "mine",
 		Sort:     sortField,
@@ -357,7 +350,8 @@ func (h *Handler) DeleteImage(c *gin.Context) {
 // Upload 处理 `POST /api/v1/upload`（multipart，**同步语义**）。
 //
 // 字段名是 Lsky 契约（snake_case）：`file` / `strategy_id` / `album_id` / `permission`。
-// `permission` 本项目**忽略**（图片公开性由图床决定，D33/D66）。
+// `permission` 本项目**忽略**（图片公开性由图床决定，D33/D66）；
+// `album_id` 也**忽略**（本项目已移除相册功能，仅收下字段不处理）。
 //
 // # 同步语义
 //
@@ -413,7 +407,6 @@ func (h *Handler) Upload(c *gin.Context) {
 	batch, err := h.deps.Uploads.EnqueueBatch(c.Request.Context(), viewer, service.EnqueueBatchInput{
 		Files:      []service.IncomingFile{incoming},
 		StorageUID: strings.TrimSpace(c.PostForm("strategy_id")),
-		AlbumUID:   strings.TrimSpace(c.PostForm("album_id")),
 		// Source 标记为 lsky，便于在操作日志里区分来源
 		Source: model.UploadSourceLsky,
 	})
@@ -524,83 +517,21 @@ func (h *Handler) finishResult(jobUID string, items []service.BatchItem) (string
 }
 
 // ---------------------------------------------------------------------------
-// 相册
+// 相册（伪造响应）
 // ---------------------------------------------------------------------------
-
-// ListAlbums 处理 `GET /api/v1/albums`。
-func (h *Handler) ListAlbums(c *gin.Context) {
-	viewer := middleware.CurrentUser(c)
-	if viewer == nil {
-		Fail(c, response.CodeUnauthorized)
-		return
-	}
-
-	views, err := h.deps.Albums.List(service.AlbumListInput{}, viewer)
-	if err != nil {
-		Fail(c, serviceCodeOf(err))
-		return
-	}
-
-	out := make([]AlbumData, 0, len(views))
-	for i := range views {
-		out = append(out, toAlbumData(&views[i]))
-	}
-	OK(c, out)
-}
-
-// DeleteAlbum 处理 `DELETE /api/v1/albums/{id}`。
 //
-// ⚠️ **相册内图片仅脱离相册，不删图片**（与 lsky 行为一致，docs/API.md §12.3）。
-// 这是与内部 `DELETE /albums/{uid}`（相册有图时返回 40901）的**刻意差异**：
-// 客户端期待「删相册成功」，因此这里传 withUploads=false 并**容忍非空**。
-func (h *Handler) DeleteAlbum(c *gin.Context) {
-	viewer := middleware.CurrentUser(c)
-	if viewer == nil {
-		Fail(c, response.CodeUnauthorized)
-		return
-	}
+// 本项目已移除相册功能，但 `/api/v1/albums` 属于 Lsky 保留路径（conflict.go）。
+// 为了让桌面端客户端（PicGo / PicList 会拉相册列表填充下拉框）不因 404 报错，
+// 这里返回**伪造的契约响应**：列表恒为空、删除恒成功，不落库、不审计。
 
-	uid := strings.TrimSpace(c.Param("id"))
-	if uid == "" {
-		Fail(c, response.CodeNotFound)
-		return
-	}
-
-	// 先把相册内的图片移出（不删除图片），再删空相册
-	if _, err := h.deps.Albums.MoveUploads(
-		c.Request.Context(), listUploadUIDsInAlbum(h, viewer, uid), "", viewer,
-		middleware.ClientIP(c), c.GetHeader("User-Agent"),
-	); err != nil {
-		// 相册为空时没有可移动的项，不算错误
-		h.deps.Log.Debug("清空相册时无图片或失败（继续删相册）", "album_uid", uid, "err", err)
-	}
-
-	if _, err := h.deps.Albums.Delete(
-		c.Request.Context(), uid, false, viewer,
-		middleware.ClientIP(c), c.GetHeader("User-Agent"),
-	); err != nil {
-		Fail(c, serviceCodeOf(err))
-		return
-	}
-	OKMsgOK(c, "删除成功")
+// ListAlbums 处理 `GET /api/v1/albums`：恒返回空列表。
+func (h *Handler) ListAlbums(c *gin.Context) {
+	OK(c, []any{})
 }
 
-// listUploadUIDsInAlbum 取某相册内的全部图片 UID（可能为空）。
-func listUploadUIDsInAlbum(h *Handler, viewer *model.User, albumUID string) []string {
-	views, _, err := h.deps.Gallery.List(service.GalleryListInput{
-		AlbumUID: albumUID,
-		Scope:    "mine",
-		Page:     1,
-		PageSize: 1000,
-	}, viewer)
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(views))
-	for _, v := range views {
-		out = append(out, v.UID)
-	}
-	return out
+// DeleteAlbum 处理 `DELETE /api/v1/albums/{id}`：恒返回成功（无实际对象可删）。
+func (h *Handler) DeleteAlbum(c *gin.Context) {
+	OKMsgOK(c, "删除成功")
 }
 
 // ---------------------------------------------------------------------------

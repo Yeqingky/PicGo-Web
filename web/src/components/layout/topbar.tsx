@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { CommandPalette } from '@/components/layout/command-palette'
 
 import { IconButton } from '@/components/ui/icon-button'
+import { LanguageToggle } from '@/components/layout/language-toggle'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
 import { UserMenu } from '@/components/layout/user-menu'
 import { t } from '@/i18n'
@@ -21,7 +22,7 @@ interface TopbarProps {
  * 顶栏（DESIGN.md §4.1，h-14 吸顶）。
  *
  * 左侧：移动端汉堡 + 桌面端折叠按钮 + 站点名
- * 右侧：命令面板（⌘K，暂为占位）、主题切换、用户菜单
+ * 右侧：命令面板（⌘K，暂为占位）、语言切换、主题切换、用户菜单
  */
 export function Topbar({ siteName, className }: TopbarProps) {
   const user = useAuthStore((state) => state.user)
@@ -80,6 +81,8 @@ export function Topbar({ siteName, className }: TopbarProps) {
         >
           <Search className="size-4" aria-hidden />
         </IconButton>
+
+        <LanguageToggle />
 
         <ThemeToggle />
 

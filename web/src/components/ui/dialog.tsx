@@ -34,8 +34,12 @@ export function DialogContent({
   className,
   children,
   showClose = true,
+  closeClassName,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  showClose?: boolean
+  closeClassName?: string
+}) {
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -55,6 +59,7 @@ export function DialogContent({
               'absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
               'disabled:pointer-events-none',
+              closeClassName,
             )}
           >
             <X className="size-4" aria-hidden />

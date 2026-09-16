@@ -89,7 +89,7 @@ func (h *SettingsHandler) GetUserSettings(c *gin.Context) {
 		"Upload": gin.H{
 			"maxSizeBytes": s.GetInt("upload.maxSizeBytes", 20<<20),
 			"allowedExts":  s.GetStringSlice("upload.allowedExts", nil),
-			"blockSvg":     s.GetBool("upload.blockSvg", false),
+			"blockSvg":     s.GetBool("upload.blockSvg", true),
 		},
 		"Features": gin.H{
 			"oauthGithubEnabled": s.GetBool("oauth.github.enabled", false),
@@ -101,7 +101,7 @@ func (h *SettingsHandler) GetUserSettings(c *gin.Context) {
 
 // UpdateUserSettings 处理 `PUT /settings`。
 //
-// body 形如 `{"ui.theme":"dark","user.defaultAlbumUID":"al_x"}`。
+// body 形如 `{"ui.theme":"dark","sidebar.collapsed":true}`。
 // 白名单外的键**不报错**，而是收集到 `Ignored` 返回 —— 前端可据此提示，
 // 且避免了「一个脏键让整次提交失败」的糟糕体验。
 func (h *SettingsHandler) UpdateUserSettings(c *gin.Context) {

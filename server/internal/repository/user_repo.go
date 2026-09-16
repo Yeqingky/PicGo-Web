@@ -226,7 +226,6 @@ func (r *UserRepo) UploadStats(userUID string) (count int64, size int64, err err
 type PurgeStats struct {
 	Uploads    int64
 	FreedBytes int64
-	Albums     int64
 	Identities int64
 	Tokens     int64
 }
@@ -264,12 +263,6 @@ func (r *UserRepo) Purge(uid string) (PurgeStats, error) {
 			}
 		}
 
-		var albums int64
-		if err := tx.Model(&model.Album{}).Where(map[string]any{"UserUID": uid}).Count(&albums).Error; err != nil {
-			return err
-		}
-		stats.Albums = albums
-
 		var identities int64
 		if err := tx.Model(&model.OAuthIdentity{}).Where(map[string]any{"UserUID": uid}).Count(&identities).Error; err != nil {
 			return err
@@ -285,7 +278,7 @@ func (r *UserRepo) Purge(uid string) (PurgeStats, error) {
 		}
 		stats.Tokens = refresh + api
 
-		for _, table := range []string{"Uploads", "Albums", "UserSettings", "UserProfiles", "OAuthIdentities", "RefreshTokens", "APITokens"} {
+		for _, table := range []string{"Uploads", "UserSettings", "UserProfiles", "OAuthIdentities", "RefreshTokens", "APITokens"} {
 			if err := tx.Exec(`DELETE FROM `+col(table)+` WHERE `+col("UserUID")+` = ?`, uid).Error; err != nil {
 				return err
 			}
@@ -309,30 +302,6 @@ func (r *UserRepo) CountUploadsByUser(uids []string) (map[string]int64, error) {
 	}
 	// Select 是原样透传 → 这里要手工加引号；Group 由 GORM 自行加引号 → 传裸列名。
 	err := r.db.Model(&model.Upload{}).
-		Select(col("UserUID")+` AS `+col("UserUID")+`, COUNT(*) AS `+col("Cnt")).
-		Where(col("UserUID")+` IN ?`, uids).
-		Group("UserUID").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, wrap(err)
-	}
-	out := make(map[string]int64, len(rows))
-	for _, row := range rows {
-		out[row.UserUID] = row.Cnt
-	}
-	return out, nil
-}
-
-// CountAlbumsByUser 批量统计相册数（列表页用）。
-func (r *UserRepo) CountAlbumsByUser(uids []string) (map[string]int64, error) {
-	if len(uids) == 0 {
-		return map[string]int64{}, nil
-	}
-	var rows []struct {
-		UserUID string
-		Cnt     int64
-	}
-	err := r.db.Model(&model.Album{}).
 		Select(col("UserUID")+` AS `+col("UserUID")+`, COUNT(*) AS `+col("Cnt")).
 		Where(col("UserUID")+` IN ?`, uids).
 		Group("UserUID").

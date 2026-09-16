@@ -23,7 +23,6 @@ type Upload struct {
 	UID        string `gorm:"size:32;uniqueIndex;not null"` // up_ 前缀的 ULID
 	UserUID    string `gorm:"size:32;index;not null"`
 	StorageUID string `gorm:"size:32;index;not null"` // 引用 StorageConfigs.UID
-	AlbumUID   string `gorm:"size:32;index"`          // 空 = 不属于任何相册
 
 	FileName     string `gorm:"size:255;not null"` // 最终文件名（含扩展名）
 	OriginalName string `gorm:"size:255"`          // 原始上传文件名
@@ -80,21 +79,3 @@ type UploadResult struct {
 }
 
 func (UploadResult) TableName() string { return "UploadResults" }
-
-// Album 是相册（用于整理图片）。
-type Album struct {
-	ID             uint64 `gorm:"primaryKey;autoIncrement"`
-	UID            string `gorm:"size:32;uniqueIndex;not null"`
-	UserUID        string `gorm:"size:32;index;not null"`
-	ParentUID      string `gorm:"size:32;index"` // 预留给未来嵌套；当前恒为空
-	Name           string `gorm:"size:128;not null"`
-	Intro          string `gorm:"size:512"`
-	CoverUploadUID string `gorm:"size:32"`
-	ImageCount     int64  `gorm:"not null;default:0"` // 冗余计数
-	SortOrder      int    `gorm:"not null;default:0"`
-	Metadata       string `gorm:"type:text"`
-	CreatedAt      int64  `gorm:"not null"`
-	UpdatedAt      int64  `gorm:"not null"`
-}
-
-func (Album) TableName() string { return "Albums" }

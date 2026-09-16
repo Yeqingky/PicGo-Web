@@ -54,8 +54,8 @@ DELETE /api/v1/albums/{id}
 > 目的：防止将来新增内部接口时误用 `/api/v1` 前缀而静默覆盖 Lsky 契约。
 >
 > **历史记录**：早期设计曾让两套 API **共享** `/api/v1`，导致内部相册需让位至
-> `/api/v1/gallery/albums`。**D80 之后该让位已取消**，内部相册回到普通路径
-> **`/api/web/v1/albums`**（见 §5 与 §15）。
+> `/api/v1/gallery/albums`。**D80 之后该让位已取消**；相册功能本身后来亦被移除（D101），
+> 内部 API 不再占用任何相册路径。
 
 ### 0.2 统一响应体（内部 API）
 
@@ -155,7 +155,7 @@ HTTP 状态码只表达**传输语义**，业务语义看 `Code`：
 |---|---|---|
 | **API JSON 字段** | **PascalCase**，缩写全大写 | `AccessToken` / `JobUID` / `StorageUID` / `UserUID` / `ImageURL` |
 | **API Query 参数名** | **PascalCase**（与响应字段保持一致，避免 `Page`/`Page` 语义割裂） | `?Page=1&PageSize=20&Keyword=xxx&StorageUID=st_01` |
-| **API 路径段** | **小写复数**（避免大小写敏感的代理/中间件问题） | `/api/web/v1/storage/configs`、`/uploads`、`/albums`、`/logs` |
+| **API 路径段** | **小写复数**（避免大小写敏感的代理/中间件问题） | `/api/web/v1/storage/configs`、`/uploads`、`/logs` |
 | **枚举取值** | **小写字符串**（字符串枚举，原样保留） | `Status=success`、`Scope=mine`、`Type=user.create` |
 | **settings 配置键** | **dot.lowerCamel**（KV 表的字符串 key，**不是列名**） | `site.name`、`upload.rateLimit.perHour` |
 | **环境变量** | **UPPER_SNAKE_CASE** | `PICGO_WEB_LISTEN`、`PICGO_WEB_DB_DRIVER` |
@@ -201,7 +201,7 @@ HTTP 状态码只表达**传输语义**，业务语义看 `Code`：
 - 密码错误 → `40101`；账号禁用 → `40104`。
 - 失败次数超 `security.loginMaxAttempts`（默认 5 次 / `security.loginWindowMinutes` 分钟，
   按 `Email + ClientIP` 统计 `LoginAttempts`）→ `42901`。
-- 每次尝试均写 `LoginAttempts`；成功写 `OperationLogs:auth.login`，失败写 `auth.failed`。
+- 每次尝试均写 `LoginAttempts`（限流依据，不对管理员展示）；成功写 `OperationLogs:auth.login`。凭据错误（含触发限流）**不写** `auth.failed`（防暴力枚举刷爆日志页）；被禁用账号的登录尝试仍写 `auth.failed`。
 - `MustChangePassword = true` 时（D32 首启引导 / 管理员重置密码），
   **除 `/auth/me`、`/auth/password`、`/auth/logout` 外所有接口返回 `40301`**，
   `Message` 为「请先修改密码」。
@@ -331,7 +331,7 @@ HTTP 状态码只表达**传输语义**，业务语义看 `Code`：
   Nickname: string; AvatarURL: string; Homepage: string;
   CapacityBytes: number;   // 0 = 不限额
   UsedBytes: number;
-  ImageCount: number; AlbumCount: number;
+  ImageCount: number;
   LastLoginAt: number; CreatedAt: number; UpdatedAt: number;
 }
 ```
@@ -380,7 +380,7 @@ HTTP 状态码只表达**传输语义**，业务语义看 `Code`：
 ```
 
 - **硬删除**（D46）：逐条走图片删除流程（含可选远端删除与配额退还，D72、D47），
-  再删 `UserProfiles` / `OAuthIdentities` / `RefreshTokens` / `APITokens` / `Albums` /
+  再删 `UserProfiles` / `OAuthIdentities` / `RefreshTokens` / `APITokens` /
   `UserSettings`，最后删 `Users` 记录。
 - 不可删自己；不可删最后一个 admin（`40901`）。
 - 写 `OperationLogs:user.delete`，`Detail` 记录删除统计。
@@ -421,6 +421,7 @@ HTTP 状态码只表达**传输语义**，业务语义看 `Code`：
       "Capabilities": {
         "SupportsPathTemplate": true,
         "SupportsRemoteDelete": true,
+        "ServerRenames": false,
         "ConfigFields": ["repo", "branch", "token", "path", "customUrl"],
         "PathFieldNames": ["path"],
         "DetectedAt": 1789347956,
@@ -494,6 +495,7 @@ type DriverConfigField = {
   Capabilities: {                 // 运行时探测结果（只读）
     SupportsPathTemplate: boolean
     SupportsRemoteDelete: boolean
+    ServerRenames: boolean       // 该图床无视魔法文件名（服务端命名，如 NodeImage）——上传结果实测回写
     ConfigFields: string[]        // 该驱动声明的配置字段名（原样）
     PathFieldNames: string[]      // 推断 SupportsPathTemplate 的依据字段
     DetectedAt: number
@@ -629,10 +631,9 @@ Query：`?Force=false`
 |---|---|---|
 | `Files` | ✅ | 可多值（同一字段名重复），单文件上限 `upload.maxSizeBytes` |
 | `StorageUID` | ✅ | 目标存储配置的 `UID` |
-| `AlbumUID` | ⬜ | 归属相册；省略则用该用户的默认相册（`upload.defaultAlbumUID` 或 `UserSettings`） |
 | `KeepLocal` | ⬜ | 是否保留本地暂存文件（覆盖全局 `upload.keepLocalCopy`） |
 
-> ⚠️ **multipart 表单字段名用 PascalCase**（`Files` / `StorageUID` / `AlbumUID` / `KeepLocal`），
+> ⚠️ **multipart 表单字段名用 PascalCase**（`Files` / `StorageUID` / `KeepLocal`），
 > 与 JSON 字段命名规则一致。**唯一例外**：Lsky 的 `POST /api/v1/upload` 用 `file` /
 > `strategy_id` / `album_id` / `permission`（外部契约，见 §12.3）。
 
@@ -650,7 +651,7 @@ Query：`?Force=false`
 
 **校验顺序**（任一失败即整体拒绝，不产生 job）：
 
-1. 扩展名白名单 `upload.allowedExts`（`upload.blockSvg = true` 时额外拒 `svg`）
+1. 扩展名白名单 `upload.allowedExts`（`upload.blockSvg = true` 时额外拒 `svg`；该配置默认 `true`）
 2. 单文件大小 ≤ `upload.maxSizeBytes`
 3. 存储配置存在、`Enabled = true`
 4. **配额**：`非管理员` 且 `UsedBytes + 本次总大小 > CapacityBytes`（`CapacityBytes > 0` 时）
@@ -671,7 +672,7 @@ Query：`?Force=false`
 
 ```jsonc
 // req
-{ "URLs": ["https://example.com/a.png"], "StorageUID": "st_01...", "AlbumUID": "" }
+{ "URLs": ["https://example.com/a.png"], "StorageUID": "st_01..." }
 // data 同 POST /uploads
 ```
 
@@ -691,7 +692,6 @@ Query：
 | `Page` `PageSize` | 分页 |
 | `Keyword` | 匹配 `FileName` / `OriginalName` / `AliasName` |
 | `StorageUID` | 按存储配置筛选 |
-| `AlbumUID` | 按相册筛选；传 `none` 表示「未归入任何相册」 |
 | `Status` | `pending` / `success` / `failed` |
 | `Scope` | **`mine`（默认）** / `all`——见下 |
 | `Sort` | `CreatedAt`（默认）/ `Size` / `FileName` |
@@ -718,7 +718,7 @@ Query：
 
 ```jsonc
 // req（全部可选）
-{ "AliasName": "封面图", "AlbumUID": "al_01JD9X..." }   // AlbumUID 传 "" 表示移出相册
+{ "AliasName": "封面图" }
 // data = Upload
 ```
 
@@ -826,7 +826,6 @@ Query：`Format` ∈ `markdown`（默认）| `url` | `html`
   UID: string;
   UserUID: string;
   StorageUID: string;
-  AlbumUID: string;              // "" = 未归入相册
   FileName: string;              // 最终文件名（含扩展名，含魔法文件名结果）
   OriginalName: string;          // 原始上传文件名
   AliasName: string;             // 用户重命名（展示优先）
@@ -854,104 +853,13 @@ Query：`Format` ∈ `markdown`（默认）| `url` | `html`
 
 ---
 
-## 5. 相册 Albums
+## 5.（已移除，D101）相册 Albums
 
-> 前缀：**`/api/web/v1/albums/**`**
+> 相册功能已整体移除（D101）：`Albums` 表、本组端点、前端 `/albums` 页均不存在。
+> Lsky 兼容层的 `/api/v1/albums` 仍在（外部冻结路径，D80），但只返回**伪造响应**：
+> 列表恒为空、删除恒成功（见 §12.3）。
 >
-> **没有标签（Tags）功能**（D55）。整理手段为「相册 + 重命名」。
->
-> ✅ **D80 后路径已回归普通形态**：早期设计因与 Lsky 共享 `/api/v1` 而让位至
-> `/api/v1/gallery/albums`；现在内部 API 前缀是 `/api/web/v1`，
-> **不再需要 `gallery/` 中间段**，也不存在任何冲突或让位。
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/web/v1/albums` | 列表（当前用户） |
-| POST | `/api/web/v1/albums` | 新建 |
-| GET | `/api/web/v1/albums/{Uid}` | 详情 |
-| PATCH | `/api/web/v1/albums/{Uid}` | 更新 |
-| DELETE | `/api/web/v1/albums/{Uid}` | 删除 |
-| POST | `/api/web/v1/albums/{Uid}/move-uploads` | 把图片移入该相册 |
-| POST | `/api/web/v1/albums/move-uploads` | 按请求体指定目标相册（含移出相册） |
-
-**`Album` 对象**
-
-```ts
-{
-  UID: string; UserUID: string;
-  ParentUID: string;        // 预留给未来嵌套；当前恒为 ""
-  Name: string; Intro: string;
-  CoverUploadUID: string;   // "" = 未设置封面
-  CoverURL: string;         // 由 CoverUploadUID 解析出的直链，便于前端展示
-  ImageCount: number;       // 冗余计数
-  SortOrder: number;
-  Metadata: Record<string, unknown>;
-  CreatedAt: number; UpdatedAt: number;
-}
-```
-
-### `GET /api/web/v1/albums`
-
-Query：`Keyword` `Sort`（`SortOrder` | `CreatedAt` | `ImageCount`）`Order`
-
-不分页（相册数量天然有限）；返回 `Data.Items`。
-
-### `POST /api/web/v1/albums`
-
-```jsonc
-// req
-{ "Name": "壁纸", "Intro": "桌面壁纸" }
-// data = Album
-```
-
-- `(UserUID, Name)` 唯一 → 重名 `40901`。
-
-### `PATCH /api/web/v1/albums/{Uid}`
-
-```jsonc
-// req（全部可选）
-{ "Name": "新名字", "Intro": "...", "CoverUploadUID": "up_01...", "SortOrder": 3 }
-// data = Album
-```
-
-`CoverUploadUID` 必须属于同一用户且 `Status = success`，否则 `40001`。
-
-### `DELETE /api/web/v1/albums/{Uid}`
-
-Query：`?WithUploads=false`
-
-- 相册内有图片且 `WithUploads = false` → `40901`（`Message` 含图片数）。
-- `WithUploads = true` → 相册内图片**仅脱离相册**（`AlbumUID` 置空），**不删除图片**。
-
-```jsonc
-// data
-{ "Deleted": true, "DetachedUploads": 12 }
-```
-
-### `POST /api/web/v1/albums/{Uid}/move-uploads`
-
-```jsonc
-// req
-{ "UploadUIDs": ["up_01...", "up_01..."] }
-// data
-{ "Moved": 2, "Skipped": 0 }
-```
-
-- 目标相册即路径中的 `{Uid}`；要把图片**移出**相册用 `POST /api/web/v1/albums/move-uploads`
-  并传 `"TargetAlbumUID": ""`。
-
-### `POST /api/web/v1/albums/move-uploads`
-
-```jsonc
-// req
-{ "UploadUIDs": ["up_01...", "up_01..."], "TargetAlbumUID": "al_01..." }   // "" = 移出相册
-// data
-{ "Moved": 2, "Skipped": 0 }
-```
-
-- 只能移动自己的图片（管理员可移动任意图片）。
-- 同步维护 `Albums.ImageCount` 冗余计数。
-- 写 `OperationLogs:image.update`（`Detail.action = "move"`）。
+> 本章节编号保留，避免既有交叉引用（§6+）失配。
 
 ---
 
@@ -1222,6 +1130,13 @@ Query：`Page` `PageSize` `Kind` `Status` `Scope`（`mine` 默认 / `all`，`all
 > **状态只有 4 个，没有 `partial`**（D37）：只要有 item 失败 → `Status = "failed"`，
 > 但**成功项的结果照样在 `Result` 中回传**，不丢数据。
 
+> **插件类任务的持久化语义**：`plugin.*` 任务由 picgo-agent 执行（执行期状态在
+> agent 内存，重启即丢），但 UID 与 agent 一致，状态与逐行日志由 Go 侧投影
+> 到 `Jobs` / `JobLogs` 表（详情/日志/列表都以 Go 表为查询真相源）。
+> 结算三保险：agent 事件即时落库 + 每 15s 向 agent **周期对账**非终结任务
+> （agent 已丢失 → 置失败「内核重启导致任务结果未知」）+ Go 启动恢复。
+> `upload` 任务则由 Go 全程管理（`RecoverInterrupted` 重置为 `queued` 交 worker 重试）。
+
 `Result` 示例（上传任务）：
 
 ```jsonc
@@ -1380,28 +1295,39 @@ Query：
 
 ### `GET /api/web/v1/logs/types`
 
+返回稳定的类型标识与对象类型。**不返回本地化展示文案**：数据库的
+`OperationLogs.Type`、日志列表的 `Type` 与本接口的 `Type` 使用同一个小写字符串值,
+由前端按当前语言映射为展示文案。
+
 ```jsonc
 // data
 {
   "Types": [
-    { "Type": "upload",             "Label": "上传",       "TargetType": "upload" },
-    { "Type": "image.delete",       "Label": "删除图片",   "TargetType": "upload" },
-    { "Type": "image.update",       "Label": "整理图片",   "TargetType": "upload" },
-    { "Type": "mail.send",          "Label": "邮件发送",   "TargetType": "email" },
-    { "Type": "user.create",        "Label": "账号创建",   "TargetType": "user" },
-    { "Type": "user.delete",        "Label": "账号注销",   "TargetType": "user" },
-    { "Type": "user.update",        "Label": "账号修改",   "TargetType": "user" },
-    { "Type": "storage.create",     "Label": "新建存储",   "TargetType": "storage" },
-    { "Type": "storage.update",     "Label": "修改存储",   "TargetType": "storage" },
-    { "Type": "storage.delete",     "Label": "删除存储",   "TargetType": "storage" },
-    { "Type": "plugin.install",     "Label": "安装插件",   "TargetType": "plugin" },
-    { "Type": "plugin.uninstall",   "Label": "卸载插件",   "TargetType": "plugin" },
-    { "Type": "plugin.update",      "Label": "更新插件",   "TargetType": "plugin" },
-    { "Type": "auth.login",         "Label": "登录",       "TargetType": "user" },
-    { "Type": "auth.failed",        "Label": "登录失败",   "TargetType": "user" },
-    { "Type": "auth.logout",        "Label": "登出",       "TargetType": "user" },
-    { "Type": "setting.update",     "Label": "修改设置",   "TargetType": "setting" },
-    { "Type": "system.log.cleanup", "Label": "日志清理",   "TargetType": "" }
+    { "Type": "upload",                 "TargetType": "upload" },
+    { "Type": "image.delete",           "TargetType": "upload" },
+    { "Type": "image.update",           "TargetType": "upload" },
+    { "Type": "mail.send",              "TargetType": "email" },
+    { "Type": "user.create",            "TargetType": "user" },
+    { "Type": "user.delete",            "TargetType": "user" },
+    { "Type": "user.update",            "TargetType": "user" },
+    { "Type": "storage.create",         "TargetType": "storage" },
+    { "Type": "storage.update",         "TargetType": "storage" },
+    { "Type": "storage.delete",         "TargetType": "storage" },
+    { "Type": "plugin.install",         "TargetType": "plugin" },
+    { "Type": "plugin.uninstall",       "TargetType": "plugin" },
+    { "Type": "plugin.update",          "TargetType": "plugin" },
+    { "Type": "auth.login",             "TargetType": "user" },
+    { "Type": "auth.failed",            "TargetType": "user" },
+    { "Type": "auth.logout",            "TargetType": "user" },
+    { "Type": "setting.update",         "TargetType": "setting" },
+    { "Type": "system.log.cleanup",     "TargetType": "" },
+    { "Type": "theme.install",           "TargetType": "theme" },
+    { "Type": "theme.uninstall",         "TargetType": "theme" },
+    { "Type": "theme.activate",          "TargetType": "theme" },
+    { "Type": "theme.rescan",            "TargetType": "theme" },
+    { "Type": "theme.settings.update",   "TargetType": "theme" },
+    { "Type": "theme.settings.clear",    "TargetType": "theme" },
+    { "Type": "theme.error",             "TargetType": "theme" }
   ]
 }
 ```
@@ -1409,7 +1335,8 @@ Query：
 > **`Type` 的取值是小写点分字符串枚举，原样保留**（D81 例外）——
 > 它们是历史数据与日志检索的键，改了会让旧记录搜不到。
 > 清单为**静态声明**（便于前端渲染筛选项）；后端写入时**不校验类型白名单**，
-> 以便新功能直接写新类型而无需改接口（D77）。
+> 以便新功能直接写新类型而无需改接口（D77）。未知类型也必须由前端降级展示,
+> 不能因为缺少翻译而崩溃。
 
 ### `GET /api/web/v1/logs/emails`
 
@@ -1479,7 +1406,7 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 ```jsonc
 // data
 {
-  "Scope": "all",
+  "Scope": "all",       // mine（普通用户）/ all（管理员）
   "Users": { "Total": 5, "Active": 4, "Disabled": 1, "Admins": 1 },
   "Uploads": { "Total": 1280, "TotalSize": 5368709120, "TodayCount": 12,
                "PendingCount": 0, "FailedCount": 8 },
@@ -1488,6 +1415,12 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
   "ByStorage": [ { "StorageUID": "st_01...", "Name": "GitHub 主仓", "Count": 1000 } ]
 }
 ```
+
+> 按角色裁剪：
+> - **`Users` 与 `ByStorage` 只对管理员返回**（普通用户的响应体里没有这两个字段，不是空值）；
+>   `Scope` 恒存在，普通用户为 `mine`。前端据此渲染概览页的管理员区块（D102/D103）。
+> - `Trend` 固定 30 条，已按**本地日**补齐空缺日期（时区位移在 SQL 里做），前端不做补零。
+> - `Users.Active = Total - Disabled`（`Status = disabled` 的数量）。
 
 ### `POST /api/web/v1/system/picgo/resync`
 
@@ -1502,7 +1435,7 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 **主题是可选的页面覆盖层**，通过 `manifest.Pages` **自行注册**要接管的页面（D94）。
 默认主题只注册 `Pages = ["/"]`（首页），因此首次行为 = 只有首页走主题。
 
-**可被主题注册的业务页面**：`/`、`/upload`、`/gallery`、`/albums`、`/jobs`、`/logs`、`/settings`（D94.1）。
+**可被主题注册的业务页面**：`/`、`/overview`、`/upload`、`/gallery`、`/jobs`、`/settings`（D94.1 / D102 / D104；普通用户日志页 `/logs` 已移除）。
 **永久保留、不可注册**：所有认证页 + `/admin/**`（安全底线，代码硬编码）。
 
 #### 请求分发顺序（**一次写通用，后续加页面不改代码**）
@@ -1623,12 +1556,19 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 
 重新扫描 `<dataDir>/themes/`。`Data` 同上（返回扫描结果）。写 `OperationLogs`（`theme.rescan`）。
 
-### `POST /api/web/v1/themes/install`（**admin**，multipart）
+### `POST /api/web/v1/themes/install`（**admin**，D96 zip / D100 Git）
 
-上传 zip 包安装主题（D96）。字段：`File`（zip，≤ 50 MiB）、`Overwrite`（bool，默认 false）。
+统一安装入口，按 `Content-Type` 分发：
+
+- **`multipart/form-data`**（带 `File` 字段）→ zip 安装（D96）：字段 `File`（zip，≤ 50 MiB）、`Overwrite`（bool，默认 false）；
+- **`application/json`**（D100）→ Git 安装，请求体 `{ "URL": "https://github.com/Yeqingky/PicGo-Web-Theme.git", "Overwrite": false }`：
+  - **仅支持 `https://`**（拒绝 http / file / ssh / 携带凭据的地址，`40001`）；
+  - 浅克隆（`--depth 1`，默认分支）到临时目录，**与 zip 同一套清单校验**（manifest 七项 + index.html + 文件数/体积限额），任何一步失败都不落盘；
+  - `.git` 不进入主题目录；克隆失败（网络 / 非 Git 仓库）返回 `40001`，单次克隆总时长上限 2 分钟；同步返回（不建 job）；
+  - 成功响应多一个 `Branch` 字段（实际克隆到的分支）。
 
 ```jsonc
-// 成功
+// 成功（两种来源同形状；Branch 仅 Git 安装返回）
 { "ID": "my-theme", "Name": "我的主题", "Version": "1.0.0", "Installed": true }
 ```
 
@@ -1775,8 +1715,8 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 {
   "Site": { "name": "PicGo Web", "description": "", "notice": "", "icp": "",
             "baseUrl": "https://img.example.com", "allowSelfRegistration": false },
-  "User": { "ui.theme": "system", "upload.defaultAlbumUID": "al_01..." },
-  "Upload": { "maxSizeBytes": 20971520, "allowedExts": ["jpg", "png"], "blockSvg": false },
+  "User": { "ui.theme": "system", "sidebar.collapsed": false },
+  "Upload": { "maxSizeBytes": 20971520, "allowedExts": ["jpg", "png"], "blockSvg": true },
   "Features": { "oauthGithubEnabled": true, "mailEnabled": true }
 }
 ```
@@ -1792,9 +1732,9 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 
 ```jsonc
 // req
-{ "ui.theme": "dark", "upload.defaultAlbumUID": "al_01..." }
+{ "ui.theme": "dark", "sidebar.collapsed": true }
 // data
-{ "Applied": ["ui.theme", "upload.defaultAlbumUID"] }
+{ "Applied": ["ui.theme", "sidebar.collapsed"] }
 ```
 
 - 写入未登记的键 → 允许（KV 表，D77），但返回 `Ignored` 列表提示拼写可能有误。
@@ -2003,7 +1943,7 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
     "capacityBytes": 5368709120,     // 字节；0 = 不限额
     "usedBytes": 1263616,
     "imageNum": 12,
-    "albumNum": 2,
+    "albumNum": 0,                 // 恒为 0：相册功能已移除（D101），仅保留契约字段
     "capacity": 5242880,             // KB —— 兼容 lsky 字段与单位
     "useCapacity": 1234              // KB
   }
@@ -2038,7 +1978,7 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 |---|---|---|
 | `file` | ✅ | 单文件（lsky 契约即单文件） |
 | `strategy_id` | ⬜ | `StorageUID`；省略则用当前默认存储配置 |
-| `album_id` | ⬜ | `AlbumUID`；省略则用默认相册 |
+| `album_id` | ⬜ | **收下但忽略**：相册功能已移除（D101），仅为不破坏客户端而兼容该字段 |
 | `permission` | ⬜ | lsky 兼容字段，本项目**忽略**（图片公开性由图床决定，D33/D66） |
 
 ```jsonc
@@ -2096,7 +2036,8 @@ Query：`Page` `PageSize` `ToAddress` `Template` `Status` `From` `To`
 }
 ```
 
-Query：`page` `per_page`（默认 20）`album_id` `order`（`newest` / `oldest`）
+Query：`page` `per_page`（默认 20）`order`（`newest` / `oldest`）
+（`album_id` 会被收下但**忽略**，D101）
 
 > **注意**：Lsky 契约的时间字段是**字符串**（`Y-m-d H:i:s`），
 > 外层信封的 `data.data` 是**双重 data**（Laravel 分页器形状）。内部 API 无此形状。
@@ -2116,16 +2057,17 @@ Query：`page` `per_page`（默认 20）`album_id` `order`（`newest` / `oldest`
 
 #### `GET /api/v1/albums`
 
+**伪造响应**（D101）：相册功能已移除，但该路径属于外部冻结的保留集（D80）——
+桌面端客户端会拉它填充下拉框，404 会让客户端报错。因此恒返回空列表：
+
 ```jsonc
 // 完整响应体（含 Lsky 信封）
-{ "status": true, "message": "success",
-  "data": [ { "id": "al_01JD9X...", "name": "壁纸", "intro": "", "image_num": 12,
-              "created_at": "2026-02-01 10:00:00", "updated_at": "2026-02-01 10:00:00" } ] }
+{ "status": true, "message": "success", "data": [] }
 ```
 
 #### `DELETE /api/v1/albums/{id}`
 
-`{id}` = `Albums.UID`。相册内图片**仅脱离相册**，不删图片。
+**伪造响应**（D101）：无实际对象可删，恒返回成功。
 
 ```jsonc
 { "status": true, "message": "删除成功", "data": null }
@@ -2230,6 +2172,7 @@ Query：`page` `per_page`（默认 20）`album_id` `order`（`newest` / `oldest`
       "Capabilities": {
         "SupportsPathTemplate": true,
         "SupportsRemoteDelete": true,
+        "ServerRenames": false,
         "ConfigFields": ["repo", "branch", "token", "path", "customUrl"],
         "PathFieldNames": ["path"],
         "DetectedAt": 1789347956,
@@ -2482,11 +2425,11 @@ Go 侧订阅后转发并入自己的 SSE Hub。
 | 类型定义 | `web/src/types/api.ts`，**必须与本文件手动保持同步**；每个实体对应一个 TS 类型 |
 | **类型字段命名** | **PascalCase**，与本文档完全一致（D81）：`interface Upload { UID: string; JobUID: string }` |
 | **变量 / 函数 / store 命名** | **camelCase**（不变，符合 JS 生态）：`const accessToken = res.AccessToken`、`fetchUploads()` |
-| 响应拦截器 | `Code !== 0` → 抛出 `ApiError(Code, Message, Data)`；网络/5xx → 抛 `ApiError(-1, ...)` |
-| 401 处理 | `40102` / `40103` → 尝试**静默刷新**（`POST /auth/refresh`）；刷新失败 → 清登录态并跳 `/login` |
+| 响应拦截器 | `Code !== 0` → 抛出 `ApiError(Code, Message, Data)`；包括 HTTP 错误状态中的统一信封；网络/5xx → 抛 `ApiError(-1, ...)` |
+| 401 处理 | HTTP 401 或 `Code=40102/40103` → 尝试**静默刷新**（`POST /auth/refresh`）并重放原请求；刷新失败 → 清登录态并跳 `/login` |
 | `40104` | 账号禁用 → 清登录态，显示「账号已被禁用」 |
 | 强制改密 | 收到 `40301` 且 `Message` 含「请先修改密码」→ 跳 `/password` |
-| SSE | 统一走 `web/src/lib/sse.ts`（基于 `EventSource`，带心跳看护 + 指数退避重连 + 重连后状态对齐），URL 为 `/api/web/v1/events` |
+| SSE | 统一走 `web/src/lib/sse.ts`（基于 `EventSource`，带心跳看护 + 指数退避重连；重连前用 `GET /auth/me` 触发过期 access token 刷新；重连后状态对齐），URL 为 `/api/web/v1/events` |
 | 上传 | `FormData` + `onUploadProgress`（浏览器侧进度）+ SSE（服务端队列进度），**以 SSE 为准**；表单字段名用 PascalCase（`Files` / `StorageUID`） |
 | 错误提示 | 直接 toast `Message`（后端已给中文可读文案） |
 | i18n | 所有面向用户文案走 i18n key（D75）；后端返回的 `Message` 可直接展示，不走 i18n |
@@ -2549,8 +2492,9 @@ Lsky 用数字 `id`），语义也不同。
 | 内部 API | **`/api/web/v1/**`** |
 | Lsky 兼容层 | **`/api/v1/**`**（独占） |
 | 冲突 | **不存在**（前缀天然隔离） |
-| 内部相册路径 | **`/api/web/v1/albums`**（`gallery/` 中间段**已取消**） |
 | 防护 | 启动时做**路由冲突检测**：内部路由若落入 Lsky 保留集则 **panic** |
+
+> 表中曾经的「内部相册路径」一行已随相册功能移除（D101）而作废。
 
 **实证依据**：生态里全部兰空插件都是**字符串拼接** `${serverUrl}/api/v1/upload`
 （实测 `picgo-plugin-lankong` / `lskypro-own` / `lskypro` / `lsky-uploader`，
@@ -2601,9 +2545,8 @@ D38 原文写 `storageConfigId`，与 D64（一律用 `UID`）冲突。
 ### 15.8 ✅ 已修正：`DATA-MODEL.md` §4.3 的相册路径说明
 
 `DATA-MODEL.md` §4.3 原写「对外路径为 `/api/v1/gallery/albums`」，与 D80 冲突。
-**已修正**为：
-
-> 对外路径为 **`/api/web/v1/albums`**（D80：内部 API 与 Lsky 兼容层前缀已完全隔离）。
+**已修正**为 `/api/web/v1/albums`；相册功能本身后来已整体移除（D101），
+该说明与对应表结构均已删除。
 
 该修正只涉及文档表述，不改变任何表结构。
 
@@ -2618,7 +2561,7 @@ D38 原文写 `storageConfigId`，与 D64（一律用 `UID`）冲突。
 | # | 事项 | 处理 |
 |---|---|---|
 | 1 | **Query 参数名用 PascalCase** | D81 只规定了「JSON 字段」与「路径段」，未明说 Query。本文档统一用 **PascalCase**（`Page` / `PageSize` / `Keyword` / `StorageUID`），与响应字段保持一致，避免前端两套拼写。**唯一例外**是 Lsky 层（`page` / `per_page`）。 |
-| 2 | **multipart 表单字段名用 PascalCase** | 同上（`Files` / `StorageUID` / `AlbumUID`）。**唯一例外**是 Lsky 的 `file` / `strategy_id`（§12.3）。 |
+| 2 | **multipart 表单字段名用 PascalCase** | 同上（`Files` / `StorageUID`）。**唯一例外**是 Lsky 的 `file` / `strategy_id`（§12.3）。 |
 | 3 | **SSE 事件名保持小写点分** | 事件名是协议层标识符（`upload.progress`），不是 JSON 字段；**事件体内部字段**用 PascalCase。 |
 | 4 | **`GET /healthz` 不使用信封** | 供容器/K8s 探针直接解析，字段名保持小写（`status` / `version` / `agent` / `uptime`）。这是唯一例外。 |
 | 5 | **agent 的 `/api/config` 与 `.../configs` 内部键原样** | picgo 原生结构（`picBed` / `picgoPlugins` / `_id` / `_configName` / 驱动字段）透传不转换；只有我们的外层键用 PascalCase。 |
@@ -2670,14 +2613,6 @@ D38 原文写 `storageConfigId`，与 D64（一律用 `UID`）冲突。
        GET    /api/web/v1/uploads/{Uid}/link
        POST   /api/web/v1/uploads/links
 
-相册   GET    /api/web/v1/albums
-       POST   /api/web/v1/albums
-       GET    /api/web/v1/albums/{Uid}
-       PATCH  /api/web/v1/albums/{Uid}
-       DELETE /api/web/v1/albums/{Uid}
-       POST   /api/web/v1/albums/{Uid}/move-uploads
-       POST   /api/web/v1/albums/move-uploads
-
 插件   GET    /api/web/v1/plugins
        GET    /api/web/v1/plugins/search
        GET    /api/web/v1/plugins/{Name}/readme
@@ -2710,7 +2645,7 @@ D38 原文写 `storageConfigId`，与 D64（一律用 `UID`）冲突。
 
 主题   GET    /api/web/v1/themes                      (admin)
        POST   /api/web/v1/themes/rescan               (admin)
-       POST   /api/web/v1/themes/install              (admin, multipart zip)
+       POST   /api/web/v1/themes/install              (admin, multipart zip 或 JSON Git 地址, D96/D100)
        DELETE /api/web/v1/themes/{ThemeID}            (admin)
        PUT    /api/web/v1/themes/active               (admin)
        GET    /api/web/v1/themes/{ThemeID}/settings   (admin)
@@ -2746,8 +2681,8 @@ D38 原文写 `storageConfigId`，与 D64（一律用 `UID`）冲突。
        POST   /api/v1/upload
        GET    /api/v1/images
        DELETE /api/v1/images/{key}
-       GET    /api/v1/albums
-       DELETE /api/v1/albums/{id}
+       GET    /api/v1/albums                   (伪造响应：恒空列表，D101)
+       DELETE /api/v1/albums/{id}              (伪造响应：恒成功，D101)
 ```
 
 ### picgo-agent（`127.0.0.1:36678`，需 `X-Agent-Token`）

@@ -465,10 +465,16 @@ func TestRouteThemeScreenshot(t *testing.T) {
 		t.Errorf("Content-Type = %q", ct)
 	}
 
-	// 没有预览图 → 40401
+	// 内嵌默认主题应提供预览图
 	w2 := do(t, engine, http.MethodGet, "/api/web/v1/themes/default/screenshot", nil, "")
-	if code, _, _ := decodeEnvelope(t, w2); code != 40401 {
-		t.Errorf("无预览图应为 40401，实际 %d", code)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("默认主题预览图应返回 200，实际 %d: %s", w2.Code, w2.Body.String())
+	}
+	if ct := w2.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("默认主题预览图 Content-Type = %q", ct)
+	}
+	if !bytes.HasPrefix(w2.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
+		t.Error("默认主题预览图不是有效 PNG")
 	}
 }
 
@@ -537,8 +543,9 @@ func TestRouteThemeInstallMultipart(t *testing.T) {
 		t.Errorf("覆盖安装应成功，实际 %d: %s", w3.Code, w3.Body.String())
 	}
 
-	// 缺 File 字段 → 40001
-	w4 := do(t, engine, http.MethodPost, "/api/web/v1/themes/install", []byte("x"), "application/json")
+	// 缺 File 字段（multipart）→ 40001
+	headerOnly, ctH := multipartHeaderOnly(t)
+	w4 := do(t, engine, http.MethodPost, "/api/web/v1/themes/install", headerOnly, ctH)
 	if code, _, _ := decodeEnvelope(t, w4); code != 40001 {
 		t.Errorf("缺 File 应为 40001，实际 %d", code)
 	}
@@ -605,7 +612,6 @@ func TestRoutePageDispatch(t *testing.T) {
 		{"/gallery", true},      // 主题注册
 		{"/gallery/up_1", true}, // 前缀匹配覆盖子路径
 		{"/upload", false},      // 未注册 → 内置 SPA
-		{"/albums", false},
 		{"/jobs", false},
 		{"/logs", false},
 		{"/settings", false},
@@ -984,6 +990,44 @@ func TestServePagePagePathsFallbackToHTML(t *testing.T) {
 		if !isSPAResponse(body) && !strings.Contains(body, embeddedThemeMarker) {
 			t.Errorf("%s 应返回 HTML 页面，实际前 80 字符: %s", p, firstN(body, 80))
 		}
+	}
+}
+
+// multipartHeaderOnly 构造一个只有 Overwrite 字段、没有 File 的 multipart 请求。
+func multipartHeaderOnly(t *testing.T) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("Overwrite", "")
+	_ = mw.Close()
+	return buf.Bytes(), mw.FormDataContentType()
+}
+
+// TestRouteThemeInstallContentTypeDispatch 校验统一安装入口的分发（D96/D100）：
+// JSON → Git 安装；multipart → zip 安装。
+func TestRouteThemeInstallContentTypeDispatch(t *testing.T) {
+	env := newTestEnv(t)
+	engine := newTestRouter(env)
+
+	// JSON body → 走 Git 安装（非法 URL 被拒，证明路由进了 Git 分支）
+	w := do(t, engine, http.MethodPost, "/api/web/v1/themes/install",
+		[]byte(`{"URL":"http://github.com/x/y.git"}`), "application/json")
+	if code, _, _ := decodeEnvelope(t, w); code != 40001 {
+		t.Fatalf("JSON 应走 Git 安装分支（http 被拒 40001），实际 %d: %s", code, w.Body.String())
+	}
+
+	// 非法 JSON → 40001（Git 分支的参数校验）
+	w2 := do(t, engine, http.MethodPost, "/api/web/v1/themes/install",
+		[]byte(`{"URL":`), "application/json")
+	if code, _, _ := decodeEnvelope(t, w2); code != 40001 {
+		t.Fatalf("非法 JSON 应为 40001，实际 %d", code)
+	}
+
+	// multipart 且缺 File → 40001（zip 分支的参数校验）
+	body, ct := multipartHeaderOnly(t)
+	w3 := do(t, engine, http.MethodPost, "/api/web/v1/themes/install", body, ct)
+	if code, _, _ := decodeEnvelope(t, w3); code != 40001 {
+		t.Fatalf("multipart 缺 File 应为 40001，实际 %d", code)
 	}
 }
 

@@ -299,6 +299,27 @@ func (r *JobRepo) PurgeLogsBefore(before int64) (int64, error) {
 	return res.RowsAffected, nil
 }
 
+// FailOrphanedPlugins 把插件类（`plugin.%`）非终结任务置为 failed。
+//
+// 用于启动恢复：agent 的插件 job 是内存态，Go 重启（或 agent 换进程）后
+// 既没有 worker 会拾取它，也无法再得知真实结果 —— 与其永远显示
+// 「进行中」，不如明确标失败并说明原因。上传 job 不在此列：
+// RecoverInterrupted 已把它们重置为 queued 交给 worker 重试。
+func (r *JobRepo) FailOrphanedPlugins() (int64, error) {
+	res := r.db.Model(&model.Job{}).
+		Where(map[string]any{"Status": []string{model.JobStatusQueued, model.JobStatusRunning}}).
+		Where(col("Kind")+" LIKE ?", "plugin.%").
+		Updates(map[string]any{
+			"Status":     model.JobStatusFailed,
+			"Error":      "服务或内核重启导致任务中断，结果未知",
+			"FinishedAt": model.Now(),
+		})
+	if res.Error != nil {
+		return 0, wrap(res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
 // PurgeFinishedJobsBefore 删除早于 before 的**已结束** job 及其子项与日志。
 func (r *JobRepo) PurgeFinishedJobsBefore(before int64) (int64, error) {
 	var deleted int64

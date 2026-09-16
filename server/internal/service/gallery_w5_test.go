@@ -461,13 +461,6 @@ func TestGalleryFilters(t *testing.T) {
 		t.Fatalf("按关键词应为 1，实际 %d", total)
 	}
 
-	// AlbumUID=none（未归入相册）
-	_, total, err = e.gallery.List(GalleryListInput{AlbumUID: "none"}, alice)
-	wantOK(t, err)
-	if total != 2 {
-		t.Fatalf("两张都未归入相册，应为 2，实际 %d", total)
-	}
-
 	// 按状态
 	_, total, err = e.gallery.List(GalleryListInput{Status: model.UploadStatusSuccess}, alice)
 	wantOK(t, err)

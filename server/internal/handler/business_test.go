@@ -398,7 +398,6 @@ func TestE2EAuthRequired(t *testing.T) {
 
 	protected := []struct{ method, path string }{
 		{http.MethodGet, "/api/web/v1/uploads"},
-		{http.MethodGet, "/api/web/v1/albums"},
 		{http.MethodGet, "/api/web/v1/jobs"},
 		{http.MethodGet, "/api/web/v1/storage/configs"},
 		{http.MethodGet, "/api/web/v1/logs"},
@@ -953,88 +952,8 @@ func parseSSEFrame(frame string) (string, string) {
 }
 
 // ---------------------------------------------------------------------------
-// 相册 / 任务 / 日志（端到端）
+// 任务 / 日志（端到端）
 // ---------------------------------------------------------------------------
-
-func TestE2EAlbumFlow(t *testing.T) {
-	e := newE2E(t)
-	storageUID := e.newStorage("默认", true)
-
-	// 建相册
-	resp := e.do(http.MethodPost, "/api/web/v1/albums", e.adminToken, map[string]any{
-		"Name": "壁纸", "Intro": "桌面壁纸",
-	})
-	if resp.Status != http.StatusOK {
-		t.Fatalf("建相册失败：HTTP %d %s", resp.Status, resp.Raw)
-	}
-	var album struct {
-		UID string `json:"UID"`
-	}
-	e.decode(resp, &album)
-	if album.UID == "" {
-		t.Fatal("相册 UID 为空")
-	}
-
-	// 上传一张并移入相册
-	upResp := e.upload(e.adminToken, map[string][]byte{"w.png": tinyPNG()}, map[string]string{
-		"StorageUID": storageUID, "AlbumUID": album.UID,
-	})
-	if upResp.Status != http.StatusOK {
-		t.Fatalf("上传失败：%s", upResp.Raw)
-	}
-	var batch struct {
-		JobUID string `json:"JobUID"`
-		Items  []struct {
-			UploadUID string `json:"UploadUID"`
-		} `json:"Items"`
-	}
-	e.decode(upResp, &batch)
-	e.waitJob(batch.JobUID, e.adminToken)
-	uploadUID := batch.Items[0].UploadUID
-
-	// 相册详情应含封面/计数
-	resp = e.do(http.MethodGet, "/api/web/v1/albums/"+album.UID, e.adminToken, nil)
-	if resp.Status != http.StatusOK {
-		t.Fatalf("相册详情失败：HTTP %d %s", resp.Status, resp.Raw)
-	}
-	var albumDetail struct {
-		ImageCount int64 `json:"ImageCount"`
-	}
-	e.decode(resp, &albumDetail)
-	if albumDetail.ImageCount != 1 {
-		t.Fatalf("相册计数应为 1，实际 %d", albumDetail.ImageCount)
-	}
-
-	// 有图片时删除相册 → 40901
-	resp = e.do(http.MethodDelete, "/api/web/v1/albums/"+album.UID, e.adminToken, nil)
-	if resp.Code != 40901 {
-		t.Fatalf("有图相册应返回 40901，实际 %d（%s）", resp.Code, resp.Raw)
-	}
-
-	// WithUploads=true → 脱离并删除
-	resp = e.do(http.MethodDelete, "/api/web/v1/albums/"+album.UID+"?WithUploads=true", e.adminToken, nil)
-	if resp.Status != http.StatusOK {
-		t.Fatalf("WithUploads 删除失败：HTTP %d %s", resp.Status, resp.Raw)
-	}
-	var delRes struct {
-		DetachedUploads int64 `json:"DetachedUploads"`
-	}
-	e.decode(resp, &delRes)
-	if delRes.DetachedUploads != 1 {
-		t.Fatalf("应脱离 1 张，实际 %d", delRes.DetachedUploads)
-	}
-
-	// 图片仍在（只是脱离相册）
-	resp = e.do(http.MethodGet, "/api/web/v1/uploads/"+uploadUID, e.adminToken, nil)
-	if resp.Status != http.StatusOK {
-		t.Fatalf("图片不应被删除：HTTP %d %s", resp.Status, resp.Raw)
-	}
-	var up map[string]any
-	e.decode(resp, &up)
-	if up["AlbumUID"] != "" {
-		t.Fatalf("应已脱离相册，实际 %v", up["AlbumUID"])
-	}
-}
 
 // TestE2EJobListAndDelete 断言任务列表与清理。
 func TestE2EJobListAndDelete(t *testing.T) {
@@ -1103,8 +1022,11 @@ func TestE2ELogsAndTypes(t *testing.T) {
 	if !contains(resp.Raw, `"Type":"upload"`) {
 		t.Fatalf("类型清单应含 upload：%s", resp.Raw)
 	}
-	if !contains(resp.Raw, `"Label":"上传"`) {
-		t.Fatalf("类型清单应含中文 Label：%s", resp.Raw)
+	if contains(resp.Raw, `"Label"`) {
+		t.Fatalf("类型清单不应返回本地化 Label：%s", resp.Raw)
+	}
+	if !contains(resp.Raw, `"Type":"theme.error"`) {
+		t.Fatalf("类型清单应含稳定的主题类型值：%s", resp.Raw)
 	}
 
 	// 日志列表
@@ -1219,7 +1141,6 @@ func TestE2EProtectedPrefixesAreEnforced(t *testing.T) {
 		{http.MethodPost, "/api/web/v1/plugins/install", map[string]any{"Names": []string{"x"}}, true},
 		{http.MethodPost, "/api/web/v1/settings/mail/test", map[string]any{"To": "a@b.c"}, true},
 		{http.MethodGet, "/api/web/v1/uploads", nil, false},
-		{http.MethodGet, "/api/web/v1/albums", nil, false},
 		{http.MethodGet, "/api/web/v1/jobs", nil, false},
 	}
 

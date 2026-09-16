@@ -20,7 +20,7 @@ export function ForbiddenPage({ className }: { className?: string }) {
         description={t('FORBIDDEN_DESC')}
         action={
           <Button asChild variant="outline">
-            <Link to="/">{t('FORBIDDEN_BACK')}</Link>
+            <Link to="/overview">{t('FORBIDDEN_BACK')}</Link>
           </Button>
         }
       />
@@ -37,7 +37,7 @@ export function NotFoundPage({ className }: { className?: string }) {
         description={t('NOT_FOUND_DESC')}
         action={
           <Button asChild variant="outline">
-            <Link to="/">{t('NOT_FOUND_BACK')}</Link>
+            <Link to="/overview">{t('NOT_FOUND_BACK')}</Link>
           </Button>
         }
       />

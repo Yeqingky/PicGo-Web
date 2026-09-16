@@ -53,7 +53,6 @@ const maxFromURLCount = 20
 //
 //	Files      可多值（同一字段名重复）
 //	StorageUID 目标存储配置
-//	AlbumUID   可选
 //	KeepLocal  可选（"true"/"1"）
 func (h *GalleryHandler) Upload(c *gin.Context) {
 	form, err := c.MultipartForm()
@@ -81,7 +80,6 @@ func (h *GalleryHandler) Upload(c *gin.Context) {
 	result, err := h.upload.EnqueueBatch(c.Request.Context(), middleware.CurrentUser(c), service.EnqueueBatchInput{
 		Files:      files,
 		StorageUID: firstFormValue(form.Value, "StorageUID"),
-		AlbumUID:   firstFormValue(form.Value, "AlbumUID"),
 		KeepLocal:  keepLocal,
 		Source:     model.UploadSourceWeb,
 	})
@@ -168,7 +166,6 @@ func (h *GalleryHandler) UploadFromURL(c *gin.Context) {
 	var req struct {
 		URLs       []string `json:"URLs"`
 		StorageUID string   `json:"StorageUID"`
-		AlbumUID   string   `json:"AlbumUID"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.InvalidParam(c, "请求体格式不正确")
@@ -201,7 +198,6 @@ func (h *GalleryHandler) UploadFromURL(c *gin.Context) {
 	result, err := h.upload.EnqueueBatch(c.Request.Context(), middleware.CurrentUser(c), service.EnqueueBatchInput{
 		Files:      files,
 		StorageUID: req.StorageUID,
-		AlbumUID:   req.AlbumUID,
 		Source:     model.UploadSourceWeb,
 	})
 	if err != nil {
@@ -219,7 +215,6 @@ func (h *GalleryHandler) List(c *gin.Context) {
 	items, total, err := h.gallery.List(service.GalleryListInput{
 		Keyword:    strings.TrimSpace(c.Query("Keyword")),
 		StorageUID: strings.TrimSpace(c.Query("StorageUID")),
-		AlbumUID:   strings.TrimSpace(c.Query("AlbumUID")),
 		Status:     strings.TrimSpace(c.Query("Status")),
 		Scope:      strings.TrimSpace(c.Query("Scope")),
 		Sort:       strings.TrimSpace(c.Query("Sort")),
@@ -250,7 +245,6 @@ func (h *GalleryHandler) Get(c *gin.Context) {
 func (h *GalleryHandler) Update(c *gin.Context) {
 	var req struct {
 		AliasName *string `json:"AliasName"`
-		AlbumUID  *string `json:"AlbumUID"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.InvalidParam(c, "请求体格式不正确")
@@ -259,7 +253,6 @@ func (h *GalleryHandler) Update(c *gin.Context) {
 
 	view, err := h.gallery.Update(c.Request.Context(), c.Param("UID"), service.GalleryUpdateInput{
 		AliasName: req.AliasName,
-		AlbumUID:  req.AlbumUID,
 	}, middleware.CurrentUser(c), middleware.ClientIP(c), c.Request.UserAgent())
 	if err != nil {
 		respondServiceError(c, h.log, err)

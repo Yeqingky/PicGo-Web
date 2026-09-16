@@ -1,5 +1,4 @@
 import {
-  Album,
   ClipboardList,
   Images,
   LayoutDashboard,
@@ -32,7 +31,7 @@ export interface NavItem {
   to: string
   icon: LucideIcon
   adminOnly?: boolean
-  /** 精确匹配（用于 `/` 这类会前缀匹配到所有路径的路由） */
+  /** 精确匹配（仅当该路径会前缀匹配到其它路由时才需要） */
   exact?: boolean
 }
 
@@ -46,12 +45,12 @@ export const navGroups: NavGroup[] = [
   {
     titleKey: null,
     items: [
-      { labelKey: 'NAV_HOME', to: '/', icon: LayoutDashboard, exact: true },
+      // ⚠️ 概览页必须用 `/overview`：`/` 在生产环境由主题渲染（D94），
+      //    指向 `/` 会让「概览」跳到主题首页，与首页冲突。
+      { labelKey: 'NAV_HOME', to: '/overview', icon: LayoutDashboard },
       { labelKey: 'NAV_UPLOAD', to: '/upload', icon: Upload },
       { labelKey: 'NAV_GALLERY', to: '/gallery', icon: Images },
-      { labelKey: 'NAV_ALBUMS', to: '/albums', icon: Album },
       { labelKey: 'NAV_JOBS', to: '/jobs', icon: ClipboardList },
-      { labelKey: 'NAV_LOGS', to: '/logs', icon: ScrollText },
       { labelKey: 'NAV_SETTINGS', to: '/settings', icon: Settings },
     ],
   },

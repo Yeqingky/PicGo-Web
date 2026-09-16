@@ -233,19 +233,17 @@ func TestUploadRejectsOversizeFile(t *testing.T) {
 	wantCode(t, err, response.CodeInvalidParam)
 }
 
-func TestUploadBlockSvg(t *testing.T) {
+func TestUploadBlockSvgByDefault(t *testing.T) {
 	e := newW5Env(t)
 	e.startQueue()
 
 	user := e.makeUser("usr_u1", "u1@example.com", model.UserRoleUser, nil)
 	e.makeStorage("默认", true)
 
-	// 默认允许 svg
-	if !e.upload.allowedExtensions()["svg"] {
-		t.Fatal("默认应允许 svg")
+	if !e.settings.GetBool("upload.blockSvg", false) {
+		t.Fatal("upload.blockSvg 默认应为 true")
 	}
 
-	wantOK(t, e.settings.Set("upload.blockSvg", true, "usr_admin"))
 	f := e.writeTempFile("x.svg", 10)
 	_, err := e.upload.EnqueueBatch(context.Background(), user, EnqueueBatchInput{
 		Files: []IncomingFile{f},

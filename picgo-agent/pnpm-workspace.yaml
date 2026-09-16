@@ -1,4 +1,13 @@
+# pnpm 12 的两项默认供应链策略，逐项放行（与 web/pnpm-workspace.yaml 同思路）：
+#
+# 1. minimumReleaseAge（默认 1440 分钟）会拒绝「发布不足 24h」的包。
+#    `@yeqingky/picgo-core` 是本仓库自维护的 npm 包（PicGo-Web fork），
+#    每次发版都必然是「新鲜」的，故按包名排除 —— 第三方依赖仍受 24h 冷却保护。
+#
+# 2. allowBuilds：依赖的 postinstall 构建脚本默认全部拦截（ERR_PNPM_IGNORED_BUILDS）。
+#    esbuild 由 tsx 传递依赖引入，其 postinstall 只做平台二进制校验，必须允许。
+minimumReleaseAgeExclude:
+  - "@yeqingky/picgo-core"
+
 allowBuilds:
   esbuild: true
-minimumReleaseAgeExclude:
-  - '@yeqingky/picgo-core@1.0.0'

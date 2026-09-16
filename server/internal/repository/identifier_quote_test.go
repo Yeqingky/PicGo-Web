@@ -180,15 +180,6 @@ func TestRepositorySQLQuotesIdentifiers(t *testing.T) {
 			why:            "Group 与 Order 相反：必须传裸列名，否则引号会被当成标识符的一部分",
 		},
 		{
-			name: "UserRepo.CountAlbumsByUser（GROUP BY）",
-			call: func() {
-				_, _ = users.CountAlbumsByUser([]string{"usr_x"})
-			},
-			mustContain:    []string{`"UserUID" IN`, `COUNT(*) AS "Cnt"`},
-			mustNotContain: []string{`GROUP BY "UserUID"`},
-			why:            "同上",
-		},
-		{
 			name: "Purge（级联删除的原生 DELETE，真实执行 + 捕获）",
 			call: func() {
 				// 事务在 DryRun 下不可用，因此在临时库上真跑（无副作用）
@@ -199,7 +190,6 @@ func TestRepositorySQLQuotesIdentifiers(t *testing.T) {
 			mustContain: []string{
 				`DELETE FROM "UploadResults" WHERE "UploadUID" IN (SELECT "UID" FROM "Uploads" WHERE "UserUID"`,
 				`DELETE FROM "Uploads" WHERE "UserUID"`,
-				`DELETE FROM "Albums" WHERE "UserUID"`,
 				`DELETE FROM "Users" WHERE "UID"`,
 			},
 			mustNotContain: []string{`WHERE UserUID`, `WHERE UID`},
@@ -247,11 +237,6 @@ func seedVictim(t *testing.T, base *UserRepo, exec *gorm.DB) {
 		UserUID: victimUID, Nickname: "victim", Locale: "zh-CN", CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatalf("预置资料失败: %v", err)
-	}
-	if err := exec.Create(&model.Album{
-		UID: "al_victim", UserUID: victimUID, Name: "默认", CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("预置相册失败: %v", err)
 	}
 	if err := exec.Create(&model.Upload{
 		UID: "up_victim", UserUID: victimUID, StorageUID: "st_x", FileName: "v.png",

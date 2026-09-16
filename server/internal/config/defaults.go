@@ -73,6 +73,11 @@ var Keys = []Key{
 	// ---------- 主题（仅站点级选择，主题自身的配置在 ThemeConfigs） ----------
 	{Name: "theme.active", Category: CategoryTheme, Type: TypeString, Default: "default",
 		Description: "当前启用的主题 ID"},
+	// 默认主题的 Git 源（D100）：seed 时优先从这里拉取（失败回退内嵌副本）；
+	// 置为空字符串可禁用 Git seed（离线部署）。
+	{Name: "theme.defaultGitURL", Category: CategoryTheme, Type: TypeString,
+		Default:     "https://github.com/Yeqingky/PicGo-Web-Theme.git",
+		Description: "默认主题的 Git 仓库地址（https）；seed 时优先拉取，失败回退内嵌副本"},
 	// 以下五项是 zip 安装的**上传保护阈值**（D96），与任何主题的 schema 无关，
 	// 因此是站点级键。默认值与 docs/OPERATIONS.md §8.9 一致。
 	{Name: "theme.maxPackageBytes", Category: CategoryTheme, Type: TypeInt, Default: int64(64) << 20,
@@ -102,8 +107,8 @@ var Keys = []Key{
 	{Name: "upload.allowedExts", Category: CategoryUpload, Type: TypeJSON,
 		Default:     []string{"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "avif"},
 		Description: "允许上传的扩展名白名单（小写，不含点）"},
-	{Name: "upload.blockSvg", Category: CategoryUpload, Type: TypeBool, Default: false,
-		Description: "禁止上传 SVG（SVG 可内嵌脚本，按需开启）"},
+	{Name: "upload.blockSvg", Category: CategoryUpload, Type: TypeBool, Default: true,
+		Description: "禁止上传 SVG（SVG 可内嵌脚本，默认开启；关闭后才允许）"},
 	{Name: "upload.concurrency", Category: CategoryUpload, Type: TypeInt, Default: 1,
 		Description: "上传队列并发度。1 = 严格串行（不依赖 PicGo-Core 补丁）；>1 需补丁支持按次指定图床"},
 	{Name: "upload.retryTimes", Category: CategoryUpload, Type: TypeInt, Default: 1,
@@ -116,8 +121,6 @@ var Keys = []Key{
 		Description: "单个文件上传超时（秒）"},
 	{Name: "upload.shutdownGraceSeconds", Category: CategoryUpload, Type: TypeInt, Default: 30,
 		Description: "优雅关闭时等待在途上传完成的时长（秒）"},
-	{Name: "upload.defaultAlbumUID", Category: CategoryUpload, Type: TypeString, Default: "",
-		Description: "新上传默认归入的相册 UID；留空表示不归入相册"},
 	{Name: "upload.rateLimit.enabled", Category: CategoryUpload, Type: TypeBool, Default: false,
 		Description: "上传限流总开关。**默认禁用**（D73）"},
 	{Name: "upload.rateLimit.perHour", Category: CategoryUpload, Type: TypeInt, Default: 100,

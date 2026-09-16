@@ -8,7 +8,7 @@ import (
 	"github.com/YeqingKy/PicGo-Web/server/internal/model"
 )
 
-// migrateV1 是初始迁移：建 21 张表 + 全部索引。
+// migrateV1 是初始迁移：建 20 张表 + 全部索引。
 //
 // 约定：
 //   - **表与单列约束**由模型的 GORM tag 声明，用 AutoMigrate 建立
@@ -48,8 +48,6 @@ func migrateV1(tx *gorm.DB) error {
 		// 媒体资源
 		{name: "idx_uploads_user_created", table: "Uploads",
 			cols: []string{"UserUID", "CreatedAt DESC"}},
-		{name: "idx_albums_user_name", table: "Albums", unique: true,
-			cols: []string{"UserUID", "Name"}},
 
 		// 任务执行
 		{name: "idx_jobs_status_created", table: "Jobs",

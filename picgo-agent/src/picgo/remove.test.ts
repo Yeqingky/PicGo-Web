@@ -108,6 +108,7 @@ describe('performRemove', () => {
     cache.set('smms', '3.0.2', {
       SupportsPathTemplate: false,
       SupportsRemoteDelete: true, // 之前误判为支持
+      ServerRenames: false,
       ConfigFields: [],
       PathFieldNames: [],
       DetectedAt: 0,

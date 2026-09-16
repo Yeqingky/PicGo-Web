@@ -135,6 +135,10 @@ export function buildCapabilities(input: CapabilityInput): Capabilities {
   return {
     SupportsPathTemplate: pathFields.length > 0,
     SupportsRemoteDelete: input.supportsRemoteDelete,
+    // picgo 协议不声明「是否尊重传入文件名」（文件名在驱动被调用前已定，
+    // 驱动自行为服务器命名不在 schema 里）；此项由 Go 侧上传结果
+    // 运行时对比回写，初始值保守为 false（见 upload_service 的探测更新）。
+    ServerRenames: false,
     ConfigFields: fields,
     PathFieldNames: pathFields,
     DetectedAt: input.now,

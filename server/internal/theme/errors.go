@@ -56,6 +56,14 @@ var (
 	// ErrThemeExists 目标目录已存在且未指定覆盖。
 	ErrThemeExists = errors.New("同名主题已存在（如需替换请勾选覆盖）")
 
+	// ---- Git 安装（D100）----
+
+	// ErrGitInvalid Git 地址不合法（仅允许 https，且不得携带凭据）。
+	ErrGitInvalid = errors.New("Git 地址不合法")
+
+	// ErrGitClone git clone 失败（网络 / 凭据 / 非 Git 仓库）。
+	ErrGitClone = errors.New("从 Git 拉取失败")
+
 	// ErrScrollUnsafe 预留：目录遍历失败。
 	ErrScanFailed = errors.New("扫描主题目录失败")
 )

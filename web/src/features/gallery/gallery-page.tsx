@@ -1,4 +1,4 @@
-import { Grid2X2, Images, List, RotateCw, Trash2, FolderInput } from 'lucide-react'
+import { Grid2X2, Images, List, RotateCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 
@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/common/page-header'
 import { ImageGrid } from '@/components/gallery/image-grid'
 import { ImageLightbox } from '@/components/gallery/image-lightbox'
 import { ImageList } from '@/components/gallery/image-list'
-import { MoveUploadsDialog, RenameUploadDialog } from '@/components/gallery/upload-dialogs'
+import { RenameUploadDialog } from '@/components/gallery/upload-dialogs'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { IconButton } from '@/components/ui/icon-button'
@@ -26,10 +26,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toast'
-import { useAlbums, useGalleryUploads, useStorageConfigs } from '@/hooks/api'
+import { useGalleryUploads, useStorageConfigs } from '@/hooks/api'
 import { t } from '@/i18n'
 import { uploadApi } from '@/lib/api'
-import { albumNameMap } from '@/lib/album'
 import { toApiError, type Upload } from '@/types/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
@@ -68,11 +67,9 @@ export function GalleryPage() {
 
   const [keywordInput, setKeywordInput] = useState(filter.Keyword)
   const [renaming, setRenaming] = useState<Upload | null>(null)
-  const [moving, setMoving] = useState<Upload[] | null>(null)
   const [deleting, setDeleting] = useState<Upload[] | null>(null)
   const [deleteRemote, setDeleteRemote] = useState(false)
 
-  const { albums } = useAlbums()
   const { items: storageConfigs } = useStorageConfigs()
 
   const {
@@ -90,13 +87,10 @@ export function GalleryPage() {
     Scope: scope,
     Keyword: filter.Keyword || undefined,
     StorageUID: filter.StorageUID || undefined,
-    AlbumUID: filter.AlbumUID || undefined,
     Status: filter.Status || undefined,
     Sort: filter.Sort,
     Order: filter.Order,
   })
-
-  const albumNames = useMemo(() => albumNameMap(albums), [albums])
 
   // 关键词输入防抖（300ms）：避免每敲一个字都打一次接口
   useEffect(() => {
@@ -178,7 +172,6 @@ export function GalleryPage() {
   const hasFilter =
     filter.Keyword !== '' ||
     filter.StorageUID !== '' ||
-    filter.AlbumUID !== '' ||
     filter.Status !== ''
 
   return (
@@ -208,21 +201,49 @@ export function GalleryPage() {
           </>
         }
       >
-        {/* 管理员 Tab（普通用户不渲染切换器，D71） */}
-        {isAdmin ? (
-          <Tabs
-            value={scope}
-            onValueChange={(value) => {
-              setScope(value as 'mine' | 'all')
-              resetPage()
-            }}
-          >
-            <TabsList>
-              <TabsTrigger value="mine">{t('GALLERY_TAB_MINE')}</TabsTrigger>
-              <TabsTrigger value="all">{t('GALLERY_TAB_ALL')}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        ) : null}
+        {/* 管理员 Tab + 多选操作（操作框与 Tab 同行并右对齐，D71） */}
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+          {isAdmin ? (
+            <Tabs
+              value={scope}
+              onValueChange={(value) => {
+                setScope(value as 'mine' | 'all')
+                resetPage()
+              }}
+            >
+              <TabsList>
+                <TabsTrigger value="mine">{t('GALLERY_TAB_MINE')}</TabsTrigger>
+                <TabsTrigger value="all">{t('GALLERY_TAB_ALL')}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          ) : null}
+
+          {selectedUIDs.length > 0 ? (
+            <div className="ml-auto flex h-10 flex-wrap items-center justify-end gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-0">
+              <span className="text-sm text-foreground">
+                {t('GALLERY_SELECTED', { count: selectedUIDs.length })}
+              </span>
+              <div className="flex items-center gap-0">
+                <LinkCopyMenu
+                  items={selectedUploads.map((item) => ({
+                    URL: item.URL,
+                    Name: item.AliasName || item.OriginalName || item.FileName,
+                  }))}
+                  iconOnly
+                  size="icon"
+                  variant="ghost"
+                />
+                <IconButton
+                  label={t('COMMON_DELETE')}
+                  className="size-10 text-destructive hover:text-destructive"
+                  onClick={() => setDeleting(selectedUploads)}
+                >
+                  <Trash2 aria-hidden />
+                </IconButton>
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         {/* 筛选栏 */}
         <div className="flex flex-wrap items-end gap-2">
@@ -248,19 +269,6 @@ export function GalleryPage() {
             }}
             allLabel={t('GALLERY_FILTER_ALL')}
             options={storageConfigs.map((config) => ({ value: config.UID, label: config.Name }))}
-          />
-
-          <FilterSelect
-            id="gallery-album"
-            label={t('GALLERY_FILTER_ALBUM')}
-            value={filter.AlbumUID}
-            onChange={(value) => {
-              patchFilter({ AlbumUID: value })
-              resetPage()
-            }}
-            allLabel={t('GALLERY_FILTER_ALL')}
-            extraOptions={[{ value: 'none', label: t('GALLERY_NO_ALBUM') }]}
-            options={albums.map((album) => ({ value: album.UID, label: album.Name }))}
           />
 
           <FilterSelect
@@ -320,39 +328,7 @@ export function GalleryPage() {
           ) : null}
         </div>
 
-        {/* 批量操作条 */}
-        {selectedUIDs.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2">
-            <span className="text-sm text-foreground">
-              {t('GALLERY_SELECTED', { count: selectedUIDs.length })}
-            </span>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <LinkCopyMenu
-                items={selectedUploads.map((item) => ({
-                  URL: item.URL,
-                  Name: item.AliasName || item.OriginalName || item.FileName,
-                }))}
-              />
-              <Button type="button" variant="outline" size="sm" onClick={() => setMoving(selectedUploads)}>
-                <FolderInput aria-hidden />
-                {t('GALLERY_MOVE_TO_ALBUM')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setDeleting(selectedUploads)}
-              >
-                <Trash2 aria-hidden />
-                {t('COMMON_DELETE')}
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={clearSelected}>
-                {t('GALLERY_CLEAR_SELECTION')}
-              </Button>
-            </div>
-          </div>
-        ) : null}
+
       </PageHeader>
 
       {/* 列表主体 */}
@@ -406,13 +382,11 @@ export function GalleryPage() {
           items={items}
           selectedUIDs={selectedUIDs}
           showUploader={scope === 'all'}
-          albumNames={albumNames}
           onToggleSelect={toggleSelected}
           onSelect={handleSelect}
           onOpen={handleOpen}
           onEdit={setRenaming}
           onDelete={(upload) => setDeleting([upload])}
-          onMove={(upload) => setMoving([upload])}
         />
       )}
 
@@ -444,20 +418,6 @@ export function GalleryPage() {
         }}
         upload={renaming}
         onRenamed={refresh}
-      />
-
-      {/* 移动到相册 */}
-      <MoveUploadsDialog
-        open={moving !== null}
-        onOpenChange={(open) => {
-          if (!open) setMoving(null)
-        }}
-        uploads={moving ?? []}
-        albums={albums}
-        onMoved={() => {
-          clearSelected()
-          refresh()
-        }}
       />
 
       {/* 删除确认（用 ConfirmDialog：异步确认按钮不能是 AlertDialogAction） */}
